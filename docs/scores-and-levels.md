@@ -19,7 +19,7 @@ For each breast:
 | `scoring_mode` | `fused` (global model + patches) or `global_only` (resolution too low for patches) | `fused` |
 | `suspicion`, `attention` | Internal scores that decide the level (see §3) | `0.91`, `0.95` |
 | `quality_issues` | Photo problems, each with a recommended action | `["blurry"]` |
-| `views[]` | Detail per view, with a heatmap if there is one, or the reason there is none | — |
+| `views[]` | Detail per view, with a heatmap if there is one, or the reason there is none, and the most suspicious regions (see §4) | — |
 
 For the whole study:
 
@@ -140,6 +140,42 @@ The project owner chose this balance ("Keep the current balance").
 
   A photo with warnings may give a less reliable result.
 - **Partial result:** a view was discarded, or only the global model was used. The app shows this.
+
+### Where the model looks: suspicious regions
+
+When the patch model runs (image at least **1500 px high**), each view also returns `regions`: up to **3** windows
+where the patch model gave the highest P(4-5). They help the reader find, on the heatmap, the areas that weighed
+most. How they are chosen:
+
+1. Each 256 px window of the scan (on the breast resized to 2048 px high, windows with enough tissue only) has a
+   patch P(4-5).
+2. Windows are taken from the highest score down. A window is kept only if its score is at least **0.25** and it
+   overlaps any window already kept by **25 % or less** (non-maximum suppression), so the three regions are not
+   copies of the same spot.
+3. The search stops at 3 regions or at the first window below 0.25. If no window reaches 0.25, the list is
+   empty: no area stands out.
+
+Each region has:
+
+| Field | Meaning |
+|---|---|
+| `x`, `y`, `width`, `height` | The window's box, from 0 to 1, relative to the heatmap image. That image is the processed breast: cropped, with the chest wall on the **left** and the nipple towards the right |
+| `score` | The raw patch-model P(4-5) of that window. It is **not calibrated** and is not the breast's probability. Use it only to rank the regions |
+| `depth` | `posterior` (third nearest the chest wall), `middle` or `anterior` (third nearest the nipple). Measured at the window's center, from the chest wall to the furthest tissue on the nipple side |
+| `vertical` | `upper`, `middle` or `lower` third of the height the breast tissue takes in the image |
+
+The text summary names the first region of each view, for example "Most suspicious area (MLO): anterior third
+(near the nipple), upper part of the breast" (in Spanish with `language: "es"`).
+
+**What regions are not.** They are a reading aid, not a lesion segmentation or a detection. A box marks a whole
+256 px window, not the outline of a finding. The model can point at normal tissue, and a finding can lie outside
+every box. The level of the breast does not depend on the regions. The positions are thirds of the breast **as it
+appears in this view**: in an MLO view "upper" is not the same as anatomically superior, so do not read them as
+clock positions or quadrants. In `global_only` mode (image below 1500 px) there is no heatmap and `regions` is
+empty.
+
+In a check on one VinDr-Mammo BI-RADS 5 case, the first region fell on the mass annotated by the radiologist. That
+is one example, not a validation of the regions.
 
 ### Plain-language explanation (performance)
 

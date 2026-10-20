@@ -56,7 +56,9 @@ There is no automatic side detection. Views are combined into one breast only wh
     "quality_issues": [],
     "views": [{"panel": 1, "side": "L", "view": "MLO",
                "probabilities": {"birads_1_2": 0.13, "birads_3": 0.04, "birads_4_5": 0.83},
-               "quality_issues": [], "has_heatmap": true, "heatmap_unavailable_reason": null}]
+               "quality_issues": [], "has_heatmap": true, "heatmap_unavailable_reason": null,
+               "regions": [{"x": 0.3846, "y": 0.4375, "width": 0.1538, "height": 0.125, "score": 0.87,
+                            "depth": "middle", "vertical": "middle"}]}]
   }],
   "rejected_panels": [],
   "masked_text_regions": 0,
@@ -64,6 +66,14 @@ There is no automatic side detection. Views are combined into one breast only wh
   "disclaimer": "Indicative result from a research tool…"
 }
 ```
+
+`regions` lists, for each view, up to 3 windows where the patch model sees the most suspicion, highest first. Each
+one has a box (`x`, `y`, `width`, `height`, from 0 to 1, relative to the heatmap image: the processed breast with
+the chest wall on the left), a `score` (the raw patch-model P(4-5) of that window, not calibrated: use it only to
+rank) and a position in words (`depth`: `posterior`, `middle` or `anterior`; `vertical`: `upper`, `middle` or
+`lower`). The list is filled whenever the patch model runs, even with `include_heatmap: false`, and is empty in
+`global_only` mode. The text summary names the first region of each view ("Most suspicious area (MLO): middle
+third, middle part of the breast").
 
 What each field means: [scores-and-levels.md](scores-and-levels.md).
 

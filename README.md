@@ -26,7 +26,8 @@ It is part of a three-repository project:
 2. **Checks that the image is a mammogram.** It rejects ultrasound, MRI and unrelated photos, and warns about photo
    quality problems.
 3. **Classifies each view** with two global models (512 and 1024 px). If the image is at least 1500 px high, it adds
-   a **2048 px patch model** (better with calcifications) and a **heatmap**.
+   a **2048 px patch model** (better with calcifications), a **heatmap** and up to 3 **suspicious regions** per view
+   (where the patch model looks most; see [docs/scores-and-levels.md](docs/scores-and-levels.md)).
 4. **Combines views of the same breast** (for example RCC + RMLO) **only when the client gives `sides`** (R/L).
    There is no automatic side detection. Without `sides`, each view is evaluated as its own "breast", labelled
    "panel N". Then it applies the calibrated thresholds.

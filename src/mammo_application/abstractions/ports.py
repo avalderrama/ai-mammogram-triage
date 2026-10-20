@@ -47,12 +47,25 @@ class MammogramGate(Protocol):
 
 
 @dataclass(frozen=True)
+class SuspiciousRegion:
+    """A window the patch model found most suspicious. Box normalized (0-1) to the heatmap image."""
+    x: float
+    y: float
+    width: float
+    height: float
+    score: float
+    depth: str      # "posterior" (near the chest wall) | "middle" | "anterior" (near the nipple)
+    vertical: str   # "upper" | "middle" | "lower" third of the breast in the image
+
+
+@dataclass(frozen=True)
 class PanelPrediction:
     probabilities: BiradsProbabilities
     global_scores: SuspicionScores
     patch_scores: SuspicionScores | None
     heatmap: EncodedImage | None
     patch_unavailable_reason: str | None = None
+    regions: tuple[SuspiciousRegion, ...] = ()
 
 
 class BiradsClassifier(Protocol):

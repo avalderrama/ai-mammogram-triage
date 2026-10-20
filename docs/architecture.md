@@ -59,7 +59,7 @@ builds the `MCPServer` object with `mammo_mcp` and passes it to `mammo_api`, whi
 | Ring | Responsibility | Must not import |
 |---|---|---|
 | `mammo_domain` | Business rules without technology: `Probability`, `BiradsProbabilities`, `SuspicionScores`, `TriageThresholds`, `TriagePolicy`, `BreastAssessment`, `StudyAssessment` | Anything outside the standard library |
-| `mammo_application` | Use cases (`AnalyzeMammogramHandler`, `CheckIsMammogramHandler`, `MaskPersonalDataHandler`) and ports as `Protocol` (`PersonalDataMasker`, `PanelSplitter`, `MammogramGate`, `BiradsClassifier`, `ScoreFuser`, `ThresholdsProvider`). Expected errors use `Result` | numpy, torch, PIL, MCP, Starlette… |
+| `mammo_application` | Use cases (`AnalyzeMammogramHandler`, `CheckIsMammogramHandler`, `MaskPersonalDataHandler`) and ports as `Protocol` (`PersonalDataMasker`, `PanelSplitter`, `MammogramGate`, `BiradsClassifier`, `ScoreFuser`, `ThresholdsProvider`) with their data types (`PanelPrediction`, `SuspiciousRegion`…). Expected errors use `Result` | numpy, torch, PIL, MCP, Starlette… |
 | `mammo_infrastructure` | Implements the ports: safe decoding, preprocessing identical to training, filter, classifiers, OCR, logistic fusion and verified bundle loading. Its only public entry point is `create_ports()` | Presentation |
 | `mammo_mcp` | The three MCP tools: argument validation, response format and coded errors | Infrastructure, numpy, torch, PIL |
 | `mammo_api` | HTTP exposure: key, limits, CORS, *DNS rebinding* protection and `/health` | Infrastructure, ML |
@@ -94,7 +94,7 @@ sequenceDiagram
         else mammogram
             U->>P: global classifier 512 + 1024
             opt height ≥ 1500 px
-                U->>P: 2048 patch scanner + heatmap
+                U->>P: 2048 patch scanner + heatmap + suspicious regions
             end
         end
     end
@@ -102,7 +102,7 @@ sequenceDiagram
     U->>P: logistic fusion (if patches) + thresholds
     D-->>U: level per breast and overall level
     U-->>T: AnalysisResultDto
-    T-->>C: summary + structuredContent + heatmaps (PNG)
+    T-->>C: summary + structuredContent (with regions) + heatmaps (PNG)
 ```
 
 Views are grouped into one breast only when the client sends `sides` (R/L). There is no automatic side detection.
@@ -136,6 +136,7 @@ Those addresses change on every start. Details are in [operations.md](operations
 | "Is it a mammogram?" filter | `ml/gate_model.py` | EfficientNet-B0 at 224 px with 3-variant TTA, plus the quality checks: minimum side, sharpness, burnt-out areas and breast fraction |
 | Global classifier | `ml/classifiers.py` (`GlobalEnsemble`) | Mean of two EfficientNet-B0 models at 512 and 1024 px, with output `[P(1-2), P(3), P(4-5)]` |
 | Patch scanner | `ml/classifiers.py` (`PatchScanner`) | 256 px windows with stride 128 over the breast at 2048 px; score = mean of the 2 most suspicious windows, plus the heatmap |
+| Suspicious regions | `ml/regions.py` (`find_regions`) | From the patch P(4-5) grid: up to 3 windows with score ≥ 0.25, after non-maximum suppression (overlap ≤ 25 %). Boxes are normalized to the heatmap image and described by depth (posterior/middle/anterior third) and vertical third. `_adapters.py` returns them as `SuspiciousRegion`; [scores-and-levels.md](scores-and-levels.md) explains how to read them |
 | Personal data | `ml/text_masking.py` | EasyOCR masks all text with confidence ≥ 0.3 and height ≤ 8 % of the image; it returns only counts |
 | Fusion and thresholds | `_adapters.py` | Logistic regression on the *logits* of both models; thresholds depend on the mode (`fused` or `global_only`) |
 | Model bundle | `bundle.py` | Checks the files and the SHA-256 of the manifest; weights are loaded with `weights_only=True` |

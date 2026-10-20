@@ -1,6 +1,6 @@
 """Use case tests with fake ports (no ML, no IO)."""
 from mammo_application.abstractions import (EncodedImage, GateVerdict, ImageDecodingError, MaskedImage,
-                                            PanelPrediction)
+                                            PanelPrediction, SuspiciousRegion)
 from mammo_application.analyses import AnalyzeMammogramCommand, AnalyzeMammogramHandler
 from mammo_application.common import ErrorCode
 from mammo_domain.assessment import (BiradsProbabilities, QualityIssue, ScoringMode, SuspicionScores,
@@ -47,7 +47,9 @@ class FakeClassifier:
         return PanelPrediction(BiradsProbabilities.of(0.2, 0.2, 0.6), SuspicionScores.of(0.6, 0.8),
                                SuspicionScores.of(0.7, 0.9) if self.patch else None,
                                EncodedImage(b"heat", "image/png") if with_heatmap and self.patch else None,
-                               None if self.patch else "low_resolution")
+                               None if self.patch else "low_resolution",
+                               regions=(SuspiciousRegion(0.6, 0.1, 0.15, 0.12, 0.9, "anterior", "upper"),)
+                               if self.patch else ())
 
 
 class FakeFuser:
@@ -149,3 +151,11 @@ def test_too_many_pixels_is_reported_as_too_large():
                                       FakeThresholds(), 1_000_000)
     result = handler.handle(AnalyzeMammogramCommand(PNG))
     assert result.error.code == ErrorCode.IMAGE_TOO_LARGE
+
+
+def test_suspicious_regions_reach_the_view_result():
+    handler = AnalyzeMammogramHandler(FakeMasker(), FakeSplitter(n=1), FakeGate(accepted=(True,)), FakeClassifier(),
+                                      FakeFuser(), FakeThresholds(), 1_000_000)
+    view = handler.handle(AnalyzeMammogramCommand(PNG, sides=("R",), views=("MLO",), panel_count=1)).value.breasts[0].views[0]
+    assert view.regions == [{"x": 0.6, "y": 0.1, "width": 0.15, "height": 0.12, "score": 0.9,
+                             "depth": "anterior", "vertical": "upper"}]

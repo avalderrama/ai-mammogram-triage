@@ -31,6 +31,10 @@ _TEXT = {
             "small_breast": "The breast fills little of the photo: crop it or move closer.",
         },
         "rejected": "Panels discarded because they don't look like mammograms: {panels}.",
+        "region": "Most suspicious area ({view}): {depth}, {vertical} part of the breast",
+        "depth": {"posterior": "posterior third (near the chest wall)", "middle": "middle third",
+                  "anterior": "anterior third (near the nipple)"},
+        "vertical": {"upper": "upper", "middle": "middle", "lower": "lower"},
         "masked_one": "1 text area was covered",
         "masked_many": "{n} text areas were covered",
         "masked_suffix": " (possible personal data).",
@@ -60,6 +64,10 @@ _TEXT = {
             "small_breast": "La mama ocupa poco de la foto: recórtala o acércate.",
         },
         "rejected": "Paneles descartados por no parecer mamografía: {panels}.",
+        "region": "Zona más sospechosa ({view}): {depth}, parte {vertical} de la mama",
+        "depth": {"posterior": "tercio posterior (cerca de la pared torácica)", "middle": "tercio medio",
+                  "anterior": "tercio anterior (cerca del pezón)"},
+        "vertical": {"upper": "superior", "middle": "media", "lower": "inferior"},
         "masked_one": "Se tapó 1 zona de texto",
         "masked_many": "Se taparon {n} zonas de texto",
         "masked_suffix": " (posibles datos personales).",
@@ -99,6 +107,11 @@ def analysis_markdown(result: AnalysisResultDto, language: Language = "en") -> s
         lines.append(f"- {t['model']}: " + (t["fused"] if b.scoring_mode == "fused" else t["global_only"]))
         for q in b.quality_issues:
             lines.append(f"- {t['quality_warning']}: {t['quality'].get(q, q)}")
+        for v in b.views:
+            if v.regions:
+                r = v.regions[0]
+                lines.append("- " + t["region"].format(view=v.view if v.view != "unknown" else f"panel {v.panel}",
+                                                        depth=t["depth"][r["depth"]], vertical=t["vertical"][r["vertical"]]))
         lines.append("")
     if result.rejected_panels:
         lines.append(t["rejected"].format(panels=", ".join(str(r.panel) for r in result.rejected_panels)))
