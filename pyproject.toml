@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-mammogram-triage"
+version = "0.1.0"
+description = "Mammogram triage (BI-RADS 1-2 / 3 / 4-5) exposed as an MCP server. Research use only."
+requires-python = ">=3.11"
+# PyTorch with CUDA is installed separately:
+#   pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu126
+dependencies = [
+    "timm>=1.0",
+    "numpy>=2.0",
+    "scipy>=1.13",
+    "pillow>=11",
+    "easyocr>=1.7",
+    "mcp>=2.3,<3",
+    "starlette>=1.0",
+    "uvicorn>=0.30",
+    "pydantic-settings>=2.5",
+    "anyio>=4.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27", "import-linter>=2.1"]
+
+[project.scripts]
+mammo-triage = "mammo_host.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = ["integration: needs the model bundle (MAMMO_MODELS_DIR) and test images (MAMMO_TEST_IMAGES_DIR)"]
+
+[tool.importlinter]
+root_packages = ["mammo_domain", "mammo_application", "mammo_infrastructure", "mammo_mcp", "mammo_api", "mammo_host"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "CA-DEP-001: dependencies point inwards (onion layers)"
+type = "layers"
+layers = [
+    "mammo_host",
+    "mammo_mcp | mammo_api | mammo_infrastructure",
+    "mammo_application",
+    "mammo_domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "CA-DEP-003: the domain does not depend on frameworks or libraries"
+type = "forbidden"
+source_modules = ["mammo_domain"]
+forbidden_modules = ["numpy", "scipy", "torch", "timm", "PIL", "easyocr", "mcp", "starlette", "uvicorn", "pydantic", "pydantic_settings", "anyio"]
+
+[[tool.importlinter.contracts]]
+name = "CA-APP-004/005: the application does not depend on web, ML or IO frameworks"
+type = "forbidden"
+source_modules = ["mammo_application"]
+forbidden_modules = ["numpy", "scipy", "torch", "timm", "PIL", "easyocr", "mcp", "starlette", "uvicorn", "pydantic_settings", "anyio"]
+
+[[tool.importlinter.contracts]]
+name = "CA-DEP-008: presentation does not use ML or image libraries directly"
+type = "forbidden"
+source_modules = ["mammo_mcp", "mammo_api"]
+forbidden_modules = ["torch", "timm", "PIL", "easyocr", "numpy", "scipy"]
