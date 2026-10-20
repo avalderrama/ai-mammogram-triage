@@ -17,7 +17,8 @@ from mammo_application.analyses import (AnalysisResultDto, AnalyzeMammogramComma
                                         MaskedImageDto)
 from mammo_application.common import AppError, Result
 
-from .formatting import DISCLAIMER, analysis_markdown, analysis_payload, check_markdown, masked_regions_text
+from .formatting import (DISCLAIMER, analysis_markdown, analysis_payload, check_markdown,
+                         masked_regions_text)
 from .inputs import ImageInputError, image_from_arguments
 
 logger = logging.getLogger("mammo_mcp")
@@ -65,11 +66,15 @@ ImagePath = Annotated[str | None, Field(
 PanelCount = Annotated[int | None, Field(
     default=None, ge=1, le=8, description="Number of side-by-side views in the image. Omit to detect separators.")]
 ResponseFormat = Annotated[Literal["markdown", "json"], Field(
-    default="markdown", description="'markdown' for a readable summary (Spanish), 'json' for the raw result.")]
+    default="markdown", description="'markdown' for a readable summary, 'json' for the raw result.")]
+SummaryLanguage = Annotated[Literal["en", "es"], Field(
+    default="en", description="Language of the readable summary: 'en' (default) or 'es' (Spanish). "
+                              "Structured content is always in English.")]
 
 
 def _error(code: str, message: str, details: dict | None = None) -> types.CallToolResult:
-    """Every tool error carries a machine-readable code in structured content (same contract for all tools)."""
+    """Errors raised by this server carry a machine-readable code in structured content (same contract for all
+    tools). Argument-schema errors are raised by the MCP SDK before the tool runs and carry no code."""
     return types.CallToolResult(is_error=True, content=[types.TextContent(type="text", text=message)],
                                 structured_content={"error": code, "message": message, "details": details})
 
@@ -132,6 +137,7 @@ def create_mcp_server(handlers: McpHandlers, options: McpOptions) -> MCPServer:
         include_heatmap: Annotated[bool, Field(
             default=True, description="Return a heatmap image per view when resolution allows (>=1500 px).")] = True,
         response_format: ResponseFormat = "markdown",
+        language: SummaryLanguage = "en",
     ) -> types.CallToolResult:
         """Mask personal data, reject non-mammograms and triage each breast of a mammogram image.
 
@@ -148,7 +154,8 @@ def create_mcp_server(handlers: McpHandlers, options: McpOptions) -> MCPServer:
             if not result.is_success:
                 return _app_error(result.error)
             payload = analysis_payload(result.value)
-            text = analysis_markdown(result.value) if response_format == "markdown" else json.dumps(payload, indent=2)
+            text = (analysis_markdown(result.value, language) if response_format == "markdown"
+                    else json.dumps(payload, indent=2))
             content: list = [types.TextContent(type="text", text=text)]
             content += [types.ImageContent(type="image", data=base64.b64encode(view.heatmap.data).decode(),
                                            mime_type=view.heatmap.media_type)
@@ -159,7 +166,8 @@ def create_mcp_server(handlers: McpHandlers, options: McpOptions) -> MCPServer:
     @mcp.tool(name="mammo_check_is_mammogram", title="Check if image is a mammogram", annotations=READ_ONLY)
     async def mammo_check_is_mammogram(image_base64: ImageBase64 = None, image_path: ImagePath = None,
                                        panel_count: PanelCount = None,
-                                       response_format: ResponseFormat = "markdown") -> types.CallToolResult:
+                                       response_format: ResponseFormat = "markdown",
+                                       language: SummaryLanguage = "en") -> types.CallToolResult:
         """Tell, per panel, whether the image is a usable 2D mammogram (CC/MLO) and report photo quality
         issues. Use it before asking a doctor to retake a photo. Does not classify BI-RADS."""
         async def work() -> types.CallToolResult:
@@ -167,14 +175,15 @@ def create_mcp_server(handlers: McpHandlers, options: McpOptions) -> MCPServer:
             if not result.is_success:
                 return _app_error(result.error)
             payload = asdict(result.value)
-            text = check_markdown(result.value) if response_format == "markdown" else json.dumps(payload, indent=2)
+            text = (check_markdown(result.value, language) if response_format == "markdown"
+                    else json.dumps(payload, indent=2))
             return types.CallToolResult(content=[types.TextContent(type="text", text=text)],
                                         structured_content=payload)
         return await guarded("mammo_check_is_mammogram", work)
 
     @mcp.tool(name="mammo_mask_personal_data", title="Mask personal data", annotations=READ_ONLY)
-    async def mammo_mask_personal_data(image_base64: ImageBase64 = None,
-                                       image_path: ImagePath = None) -> types.CallToolResult:
+    async def mammo_mask_personal_data(image_base64: ImageBase64 = None, image_path: ImagePath = None,
+                                       language: SummaryLanguage = "en") -> types.CallToolResult:
         """Cover every text region drawn over a medical image (names, IDs, dates, ages...) and return the
         masked image as PNG. The text that is read is never returned or stored, only counts by category.
         Very faint or very large text may be missed: review the result before sharing it."""
@@ -184,7 +193,7 @@ def create_mcp_server(handlers: McpHandlers, options: McpOptions) -> MCPServer:
                 return _app_error(result.error)
             r = result.value
             return types.CallToolResult(
-                content=[types.TextContent(type="text", text=masked_regions_text(r.masked_regions) + "."),
+                content=[types.TextContent(type="text", text=masked_regions_text(r.masked_regions, language) + "."),
                          types.ImageContent(type="image", data=base64.b64encode(r.image.data).decode(),
                                             mime_type=r.image.media_type)],
                 structured_content={"masked_regions": r.masked_regions, "region_categories": r.region_categories})

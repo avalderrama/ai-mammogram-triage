@@ -32,7 +32,7 @@ async def test_analyze_returns_summary_structured_content_and_heatmap():
                                         {"image_base64": "data:image/png;base64," + B64, "sides": ["R"],
                                          "views": ["MLO"]})
     assert not result.is_error
-    assert "ALTA PRIORIDAD" in result.content[0].text
+    assert "HIGH PRIORITY" in result.content[0].text
     assert result.content[1].type == "image" and result.content[1].mime_type == "image/png"
     breast = result.structured_content["breasts"][0]
     assert breast["level"] == "high_priority" and breast["views"][0]["has_heatmap"] is True
@@ -83,7 +83,7 @@ async def test_image_path_allowed_in_local_mode(tmp_path):
     async with Client(server(h, local=True)) as client:
         result = await client.call_tool("mammo_check_is_mammogram", {"image_path": str(image)})
         rejected = await client.call_tool("mammo_check_is_mammogram", {"image_path": str(tmp_path / "secret.txt")})
-    assert not result.is_error and "es mamografía" in result.content[0].text
+    assert not result.is_error and "is a mammogram" in result.content[0].text
     assert rejected.is_error and "extension" in rejected.content[0].text
 
 
@@ -150,3 +150,18 @@ async def test_server_answers_busy_beyond_the_pending_limit():
             release.set()
     codes = sorted((r.structured_content or {}).get("error", "ok") for r in results)
     assert codes == ["ok", "server_busy"]
+
+
+async def test_summary_in_spanish_on_request_structured_content_unchanged():
+    async with Client(server()) as client:
+        en = await client.call_tool("mammo_analyze_mammogram", {"image_base64": B64})
+        es = await client.call_tool("mammo_analyze_mammogram", {"image_base64": B64, "language": "es"})
+    assert "HIGH PRIORITY" in en.content[0].text and "ALTA PRIORIDAD" in es.content[0].text
+    assert en.structured_content == es.structured_content
+
+
+async def test_schema_errors_from_the_sdk_have_no_code():
+    """Documented contract: clients must treat errors without structuredContent.error as unexpected."""
+    async with Client(server()) as client:
+        result = await client.call_tool("mammo_analyze_mammogram", {"image_base64": B64, "panel_count": 9})
+    assert result.is_error and result.structured_content is None
