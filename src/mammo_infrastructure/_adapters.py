@@ -6,7 +6,7 @@ import threading
 
 import numpy as np
 
-from mammo_application.abstractions import EncodedImage, GateVerdict, MaskedImage, PanelPrediction
+from mammo_application.abstractions import EncodedImage, GateVerdict, MaskedImage, PanelPrediction, SuspiciousRegion
 from mammo_domain.assessment import (BiradsProbabilities, QualityIssue, ScoringMode, SuspicionScores,
                                      TriageThresholds)
 
@@ -15,6 +15,7 @@ from .ml.classifiers import GlobalEnsemble, PatchScanner, render_heatmap
 from .ml.gate_model import GateModel
 from .ml.imaging import decode, encode_png, to_gray_array
 from .ml.panels import equal_panels, find_panels
+from .ml.regions import find_regions
 from .ml.text_masking import TextMasker
 
 _EPS = 1e-4
@@ -71,7 +72,8 @@ class _BiradsClassifier:
                                        f"low_resolution: needs at least {self._min_patch_height} px of height")
             p45, lesion, heat, breast = self._scanner.scan(gray)
         heatmap = encode_png(render_heatmap(breast, heat)) if with_heatmap else None
-        return PanelPrediction(probabilities, global_scores, SuspicionScores.of(p45, lesion), heatmap)
+        regions = tuple(SuspiciousRegion(**r) for r in find_regions(heat, breast))
+        return PanelPrediction(probabilities, global_scores, SuspicionScores.of(p45, lesion), heatmap, regions=regions)
 
 
 def _logit(p: float) -> float:

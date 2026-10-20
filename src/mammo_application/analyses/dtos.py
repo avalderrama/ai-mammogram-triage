@@ -30,6 +30,8 @@ class ViewResultDto:
     quality_issues: list[str]
     heatmap: EncodedImage | None
     heatmap_unavailable_reason: str | None
+    # Most suspicious windows of the patch model; boxes normalized to the heatmap image. Empty without patches.
+    regions: list[dict] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

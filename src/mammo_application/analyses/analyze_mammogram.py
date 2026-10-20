@@ -1,6 +1,8 @@
 """Use case: analyze a mammogram image and triage each breast."""
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from mammo_application.abstractions import (BiradsClassifier, ImageDecodingError, MammogramGate, PanelSplitter,
                                             PersonalDataMasker, ScoreFuser, ThresholdsProvider)
 from mammo_application.common import ErrorCode, Result, decoding_error, validate_image
@@ -73,7 +75,8 @@ class AnalyzeMammogramHandler:
                 probabilities=_probabilities_dict(f.probabilities),
                 quality_issues=[q.value for q in f.quality_issues],
                 heatmap=predictions[f.panel_index].heatmap,
-                heatmap_unavailable_reason=predictions[f.panel_index].patch_unavailable_reason)
+                heatmap_unavailable_reason=predictions[f.panel_index].patch_unavailable_reason,
+                regions=[asdict(r) for r in predictions[f.panel_index].regions])
                 for f in breast.findings]
             probs = breast.probabilities()
             breasts.append(BreastResultDto(
