@@ -1,0 +1,33 @@
+[Unit]
+Description=Mammogram triage MCP server (ONNX backend)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mammo
+Group=mammo
+WorkingDirectory=/opt/mammo-triage
+# Read by systemd as root before dropping privileges: the file stays root-only (0600).
+EnvironmentFile=/etc/mammo-triage/env
+ExecStart=/opt/mammo-triage/venv/bin/mammo-triage http
+Restart=on-failure
+RestartSec=5
+
+# Hardening: read-only system, no home, no new privileges, only the loopback socket it needs.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+ReadOnlyPaths=/opt/mammo-triage
+
+[Install]
+WantedBy=multi-user.target
