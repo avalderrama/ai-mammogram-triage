@@ -42,7 +42,8 @@ They need a local library of test images that is not published (`MAMMO_TEST_IMAG
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on every pull request and on `main`: `pytest` and `lint-imports` on Python 3.11 and
-3.12, and `pip-audit` on the installed dependencies. The weights are private, so the integration tests do not run
+3.12, and `pip-audit` on the installed dependencies. A change that only touches documentation (Markdown files, `docs/`, `LICENSE`, `NOTICE`) skips the tests;
+the **CI result** job always reports and is the only check the branch protection of `main` requires. The weights are private, so the integration tests do not run
 there; run them locally (`pytest -m integration`) before changing the model code. Dependabot
 (`.github/dependabot.yml`) opens weekly update pull requests for the Python packages and the GitHub Actions.
 
