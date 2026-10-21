@@ -53,7 +53,7 @@ class AnalyzeMammogramHandler:
             if not verdict.is_mammogram:
                 rejected.append(RejectedPanelDto(i + 1, round(verdict.confidence, 3)))
                 continue
-            pred = self._classifier.predict(panel, command.include_heatmap)
+            pred = self._classifier.predict(panel, command.include_heatmap, command.heatmap_format == "layers")
             predictions[i] = pred
             findings.append(ViewFinding(i, sides[i], views[i], pred.probabilities, pred.global_scores,
                                         pred.patch_scores, verdict.quality_issues))
@@ -76,7 +76,8 @@ class AnalyzeMammogramHandler:
                 quality_issues=[q.value for q in f.quality_issues],
                 heatmap=predictions[f.panel_index].heatmap,
                 heatmap_unavailable_reason=predictions[f.panel_index].patch_unavailable_reason,
-                regions=[asdict(r) for r in predictions[f.panel_index].regions])
+                regions=[asdict(r) for r in predictions[f.panel_index].regions],
+                heatmap_overlay=predictions[f.panel_index].heatmap_overlay)
                 for f in breast.findings]
             probs = breast.probabilities()
             breasts.append(BreastResultDto(

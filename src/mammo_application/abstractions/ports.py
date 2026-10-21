@@ -63,13 +63,16 @@ class PanelPrediction:
     probabilities: BiradsProbabilities
     global_scores: SuspicionScores
     patch_scores: SuspicionScores | None
+    # The red areas drawn over the processed breast; with heatmap layers, the processed breast alone and
+    # heatmap_overlay holds the red areas as a transparent image of the same size.
     heatmap: EncodedImage | None
     patch_unavailable_reason: str | None = None
     regions: tuple[SuspiciousRegion, ...] = ()
+    heatmap_overlay: EncodedImage | None = None
 
 
 class BiradsClassifier(Protocol):
-    def predict(self, panel: EncodedImage, with_heatmap: bool) -> PanelPrediction: ...
+    def predict(self, panel: EncodedImage, with_heatmap: bool, heatmap_layers: bool = False) -> PanelPrediction: ...
 
 
 class ScoreFuser(Protocol):

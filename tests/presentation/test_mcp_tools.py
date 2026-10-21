@@ -1,12 +1,14 @@
 """MCP tools through an in-process client (real protocol, fake use cases)."""
 import base64
+from dataclasses import replace
 
 import pytest
 from mcp import Client
 
+from mammo_application.common import Result
 from mammo_mcp import McpOptions, create_mcp_server
 
-from .fakes import NOT_MAMMOGRAM, PNG_BYTES, handlers
+from .fakes import NOT_MAMMOGRAM, OVERLAY, PNG_BYTES, analysis, handlers
 
 B64 = base64.b64encode(PNG_BYTES).decode()
 pytestmark = pytest.mark.anyio
@@ -36,9 +38,33 @@ async def test_analyze_returns_summary_structured_content_and_heatmap():
     assert result.content[1].type == "image" and result.content[1].mime_type == "image/png"
     breast = result.structured_content["breasts"][0]
     assert breast["level"] == "high_priority" and breast["views"][0]["has_heatmap"] is True
-    assert "heatmap" not in breast["views"][0]
+    assert "heatmap" not in breast["views"][0] and "heatmap_overlay" not in breast["views"][0]
+    assert result.structured_content["heatmap_format"] == "combined" and len(result.content) == 2
     command = h.analyze.calls[0]
     assert command.image.data == PNG_BYTES and command.sides == ("R",) and command.views == ("MLO",)
+    assert command.heatmap_format == "combined"
+
+
+async def test_analyze_with_heatmap_layers_returns_the_breast_then_the_red_areas():
+    h = handlers(analyze=Result.ok(analysis(layers=True)))
+    async with Client(server(h)) as client:
+        result = await client.call_tool("mammo_analyze_mammogram", {"image_base64": B64, "heatmap_format": "layers"})
+    assert h.analyze.calls[0].heatmap_format == "layers"
+    assert result.structured_content["heatmap_format"] == "layers"
+    assert [c.type for c in result.content] == ["text", "image", "image"]
+    assert base64.b64decode(result.content[2].data) == OVERLAY.data
+
+
+async def test_a_view_without_its_red_layer_sends_no_image_rather_than_shifting_the_others():
+    view = analysis(layers=True).breasts[0].views[0]
+    alone = replace(view, panel=1, heatmap_overlay=None)
+    breast = replace(analysis().breasts[0], views=[alone, replace(view, panel=2)])
+    h = handlers(analyze=Result.ok(replace(analysis(), breasts=[breast])))
+    async with Client(server(h)) as client:
+        result = await client.call_tool("mammo_analyze_mammogram", {"image_base64": B64, "heatmap_format": "layers"})
+    views = result.structured_content["breasts"][0]["views"]
+    assert [v["has_heatmap"] for v in views] == [False, True]
+    assert [c.type for c in result.content] == ["text", "image", "image"]
 
 
 async def test_analyze_json_format():

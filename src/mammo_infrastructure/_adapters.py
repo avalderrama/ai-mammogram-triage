@@ -11,7 +11,7 @@ from mammo_domain.assessment import (BiradsProbabilities, QualityIssue, ScoringM
                                      TriageThresholds)
 
 from .bundle import ModelBundle
-from .ml.classifiers import GlobalEnsemble, PatchScanner, render_heatmap
+from .ml.classifiers import GlobalEnsemble, PatchScanner, render_heatmap, render_heatmap_layers
 from .ml.gate_model import GateModel
 from .ml.imaging import decode, encode_png, to_gray_array
 from .ml.panels import equal_panels, find_panels
@@ -61,7 +61,7 @@ class _BiradsClassifier:
         self._ensemble, self._scanner = ensemble, scanner
         self._min_patch_height, self._lock = min_patch_height, lock
 
-    def predict(self, panel: EncodedImage, with_heatmap: bool) -> PanelPrediction:
+    def predict(self, panel: EncodedImage, with_heatmap: bool, heatmap_layers: bool = False) -> PanelPrediction:
         gray = to_gray_array(decode(panel))
         with self._lock:
             p = self._ensemble.probabilities(gray)
@@ -71,9 +71,14 @@ class _BiradsClassifier:
                 return PanelPrediction(probabilities, global_scores, None, None,
                                        f"low_resolution: needs at least {self._min_patch_height} px of height")
             p45, lesion, heat, breast = self._scanner.scan(gray)
-        heatmap = encode_png(render_heatmap(breast, heat)) if with_heatmap else None
+        heatmap = overlay = None
+        if with_heatmap and heatmap_layers:
+            heatmap, overlay = (encode_png(layer) for layer in render_heatmap_layers(breast, heat))
+        elif with_heatmap:
+            heatmap = encode_png(render_heatmap(breast, heat))
         regions = tuple(SuspiciousRegion(**r) for r in find_regions(heat, breast))
-        return PanelPrediction(probabilities, global_scores, SuspicionScores.of(p45, lesion), heatmap, regions=regions)
+        return PanelPrediction(probabilities, global_scores, SuspicionScores.of(p45, lesion), heatmap, regions=regions,
+                               heatmap_overlay=overlay)
 
 
 def _logit(p: float) -> float:
