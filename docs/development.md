@@ -39,6 +39,13 @@ They need a local library of test images that is not published (`MAMMO_TEST_IMAG
 - `test_real_models.py`: `MAMMO_MODELS_DIR`, in either format (run it once per format).
 - `test_backend_parity.py`: `MAMMO_TORCH_MODELS_DIR` and `MAMMO_ONNX_MODELS_DIR`, the same bundle in both formats. It needs both extras installed (`".[onnx,torch,dev]"`). PyTorch runs on CPU in float32, so the gate, the probabilities, the patch scores, the heatmap presence and the regions must agree within 0.001. The patch cases (views of at least 1500 px) fail if the patch scanner stops running on them. Both backends must also keep reference outputs recorded from the PyTorch code before the backends were split, which catches a change in the shared numpy code. Finally, the ONNX masker must hide fake personal data, including 16 px text on a 4000 px image.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and on `main`: `pytest` and `lint-imports` on Python 3.11 and
+3.12, and `pip-audit` on the installed dependencies. The weights are private, so the integration tests do not run
+there; run them locally (`pytest -m integration`) before changing the model code. Dependabot
+(`.github/dependabot.yml`) opens weekly update pull requests for the Python packages and the GitHub Actions.
+
 ## Common changes
 
 ### Change the model or the thresholds
