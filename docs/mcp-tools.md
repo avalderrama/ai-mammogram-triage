@@ -139,15 +139,23 @@ Over HTTP these responses can also arrive before the tool runs:
 **Claude Desktop (stdio).** With the configuration in the [README](../README.md), just ask, for example:
 "Analyze the mammogram C:\path\rmlo.png; it is a right MLO."
 
-**Over HTTP with the official Python client:**
+**Over HTTP with the official Python client** (`mcp` 2.x; the headers go on the HTTP client, and an analysis can take
+longer than the default timeouts):
 
 ```python
+import httpx2
 from mcp import Client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
-async with Client("https://xxx.trycloudflare.com/mcp", headers={"Authorization": f"Bearer {key}"}) as c:
+http = create_mcp_http_client(headers={"Authorization": f"Bearer {key}"}, timeout=httpx2.Timeout(240))
+async with Client(streamable_http_client("https://xxx.trycloudflare.com/mcp", http_client=http),
+                  read_timeout_seconds=240) as c:
     result = await c.call_tool("mammo_analyze_mammogram",
                                {"image_base64": b64, "sides": ["L"], "views": ["MLO"], "language": "en"})
 ```
+
+Behind Cloudflare Access (ADR 0006), Access stops a script before it reaches the server: it also needs an Access
+service token (`CF-Access-Client-Id` and `CF-Access-Client-Secret` headers) allowed by the application's policy.
 
 **Over HTTP with TypeScript:** see `src/infrastructure/mcp/mcpTriageGateway.ts` in the
 [app repository](https://github.com/avalderrama/ai-mammogram-triage-app).
