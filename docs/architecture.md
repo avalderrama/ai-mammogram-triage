@@ -43,7 +43,7 @@ flowchart TB
     HOST["mammo_host<br/>composition root · configuration · CLI"]
     MCP["mammo_mcp<br/>MCP tools"]
     API["mammo_api<br/>secure HTTP"]
-    INFRA["mammo_infrastructure<br/>PyTorch · EasyOCR · Pillow · model bundle"]
+    INFRA["mammo_infrastructure<br/>ONNX Runtime · RapidOCR (or PyTorch · EasyOCR) · Pillow · model bundle"]
     APPL["mammo_application<br/>use cases · ports · DTOs · Result"]
     DOM["mammo_domain<br/>probabilities · scores · triage policy · per-breast assessment"]
     HOST --> MCP & API & INFRA
@@ -60,7 +60,7 @@ builds the `MCPServer` object with `mammo_mcp` and passes it to `mammo_api`, whi
 |---|---|---|
 | `mammo_domain` | Business rules without technology: `Probability`, `BiradsProbabilities`, `SuspicionScores`, `TriageThresholds`, `TriagePolicy`, `BreastAssessment`, `StudyAssessment` | Anything outside the standard library |
 | `mammo_application` | Use cases (`AnalyzeMammogramHandler`, `CheckIsMammogramHandler`, `MaskPersonalDataHandler`) and ports as `Protocol` (`PersonalDataMasker`, `PanelSplitter`, `MammogramGate`, `BiradsClassifier`, `ScoreFuser`, `ThresholdsProvider`) with their data types (`PanelPrediction`, `SuspiciousRegion`…). Expected errors use `Result` | numpy, torch, PIL, MCP, Starlette… |
-| `mammo_infrastructure` | Implements the ports: safe decoding, preprocessing identical to training, filter, classifiers, OCR, logistic fusion and verified bundle loading. Its only public entry point is `create_ports()` | Presentation |
+| `mammo_infrastructure` | Implements the ports: safe decoding, preprocessing identical to training, filter, classifiers, OCR, logistic fusion and verified bundle loading. The model logic is plain numpy; the networks and the OCR engine come from one of two interchangeable backends (section 5). Its only public entry point is `create_ports()` | Presentation |
 | `mammo_mcp` | The three MCP tools: argument validation, response format and coded errors | Infrastructure, numpy, torch, PIL |
 | `mammo_api` | HTTP exposure: key, limits, CORS, *DNS rebinding* protection and `/health` | Infrastructure, ML |
 | `mammo_host` | Reads the configuration, creates the ports, injects them into the use cases and starts stdio or HTTP | — |
@@ -137,9 +137,10 @@ Those addresses change on every start. Details are in [operations.md](operations
 | Global classifier | `ml/classifiers.py` (`GlobalEnsemble`) | Mean of two EfficientNet-B0 models at 512 and 1024 px, with output `[P(1-2), P(3), P(4-5)]` |
 | Patch scanner | `ml/classifiers.py` (`PatchScanner`) | 256 px windows with stride 128 over the breast at 2048 px; score = mean of the 2 most suspicious windows, plus the heatmap |
 | Suspicious regions | `ml/regions.py` (`find_regions`) | From the patch P(4-5) grid: up to 3 windows with score ≥ 0.25, after non-maximum suppression (overlap ≤ 25 %). Boxes are normalized to the heatmap image and described by depth (posterior/middle/anterior third) and vertical third. `_adapters.py` returns them as `SuspiciousRegion`; [scores-and-levels.md](scores-and-levels.md) explains how to read them |
-| Personal data | `ml/text_masking.py` | EasyOCR masks all text with confidence ≥ 0.3 and height ≤ 8 % of the image; it returns only counts |
+| Personal data | `ml/text_masking.py` | Masks all text with confidence ≥ 0.3 and height ≤ 8 % of the image (RapidOCR boxes are measured without their ~15 % padding); it returns only counts. The engine is injected: RapidOCR or EasyOCR. With RapidOCR, images above 1024 px are read in overlapping full-resolution tiles (bounded memory, small print kept) |
 | Fusion and thresholds | `_adapters.py` | Logistic regression on the *logits* of both models; thresholds depend on the mode (`fused` or `global_only`) |
-| Model bundle | `bundle.py` | Checks the files and the SHA-256 of the manifest; weights are loaded with `weights_only=True` |
-| Concurrency | `_adapters.py` and `mammo_mcp/server.py` | A single GPU lock and at most 3 requests in flight; beyond that the server answers `server_busy` |
+| Model bundle | `bundle.py` | Reads the format from the manifest (`onnx` or `torch`), checks the files and the SHA-256 of each one. PyTorch weights are loaded with `weights_only=True`; ONNX files hold no code |
+| Inference backends | `ml/onnx_backend.py`, `ml/torch_backend.py` | Each one turns the bundle into networks (`ml/inference.py`: uint8 batch → probabilities) plus an OCR engine. `registration.py` imports only the one the bundle needs. They are the only modules allowed to import their libraries (checked by `tests/architecture`) |
+| Concurrency | `_adapters.py` and `mammo_mcp/server.py` | A single inference lock and at most 3 requests in flight; beyond that the server answers `server_busy` |
 
 How those outputs become levels: [scores-and-levels.md](scores-and-levels.md).

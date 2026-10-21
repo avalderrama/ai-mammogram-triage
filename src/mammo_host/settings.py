@@ -12,7 +12,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="MAMMO_", env_file=".env", extra="ignore")
 
     models_dir: Path = Field(description="Folder with the exported model bundle (manifest.json + weights).")
-    device: Literal["auto", "cuda", "cpu"] = "auto"
+    device: Literal["auto", "cuda", "cpu"] = Field(
+        default="auto", description="PyTorch bundles only; ONNX bundles always run on CPU (cuda is rejected).")
     verify_bundle: bool = True
     api_key: SecretStr | None = Field(default=None, description="Required for the http transport (>= 24 chars).")
     max_image_mb: float = Field(default=10, gt=0, le=50)

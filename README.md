@@ -55,18 +55,29 @@ them: [docs/scores-and-levels.md](docs/scores-and-levels.md).
 
 ## Quick start
 
-Requires Python 3.11 and, optionally, an NVIDIA GPU.
+Requires Python 3.11. Two inference backends give the same results (see
+[ADR 0005](docs/adr/0005-onnx-runtime-backend.md)); install the one that matches your model bundle.
+
+**ONNX Runtime + RapidOCR (recommended, CPU only):** no PyTorch. A full analysis peaks at ~0.6 GB of memory and takes
+1–3 s per image on a 4-core CPU (~7 s for a 12 MP photo).
+
+```bash
+pip install -e ".[onnx,dev]"
+```
+
+**PyTorch + EasyOCR (GPU or research):** install PyTorch with CUDA first. A full analysis peaks at ~5 GB on CPU.
 
 ```bash
 pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu126
 ```
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[torch,dev]"
 ```
 
 The weights are **not published** (see [ADR 0003](docs/adr/0003-weights-not-published.md)). Set
-`MAMMO_MODELS_DIR` to the folder of the bundle exported by the training repository.
+`MAMMO_MODELS_DIR` to the folder of the bundle exported by the training repository. The bundle's `manifest.json`
+declares its format (`onnx` or `torch`), and the server loads the matching backend.
 
 **Local, with Claude Desktop (stdio):**
 
@@ -114,7 +125,7 @@ are listed in [docs/operations.md](docs/operations.md#remote-pilot-with-https-tu
 | [Security and privacy](docs/security-and-privacy.md) | Defenses, accepted risks and what to do if the key leaks |
 | [Operations](docs/operations.md) | Installation, configuration variables, start modes, pilot and common problems |
 | [Development](docs/development.md) | Tests, conventions and how to make the usual changes |
-| [Decisions (ADR)](docs/adr/) | Python, MCP without REST, unpublished weights, pilot with tunnel and key |
+| [Decisions (ADR)](docs/adr/) | Python, MCP without REST, unpublished weights, pilot with tunnel and key, ONNX Runtime backend |
 
 ## Tests
 

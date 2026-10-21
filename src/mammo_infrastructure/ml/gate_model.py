@@ -1,16 +1,15 @@
-"""'Is it a mammogram?' filter and photo quality checks (same logic as the training repository's gate.py)."""
+"""'Is it a mammogram?' filter and photo quality checks (same logic as the training repository's gate.py).
+
+Backend-independent: the network is injected (PyTorch or ONNX Runtime, see inference.Network).
+"""
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
-import torch
 from PIL import Image, ImageFilter
 from scipy import ndimage
 
-from .networks import load_network, normalize
-
-GATE_SIZE = 224
+from .constants import GATE_SIZE
+from .inference import LoadedNetwork
 
 
 def to_square(img: Image.Image, size: int = GATE_SIZE) -> np.ndarray:
@@ -22,20 +21,17 @@ def to_square(img: Image.Image, size: int = GATE_SIZE) -> np.ndarray:
 
 
 class GateModel:
-    def __init__(self, path: Path, device: torch.device) -> None:
-        self._device = device
-        self._net, meta = load_network(path, 2, device)
-        self.threshold: float = meta["umbral"]
-        self.quality: dict = meta["calidad"]
+    def __init__(self, loaded: LoadedNetwork) -> None:
+        self._network = loaded.network
+        self.threshold: float = float(loaded.meta["umbral"])
+        self.quality: dict = loaded.meta["calidad"]
 
-    @torch.no_grad()
     def p_mammogram(self, img: Image.Image) -> float:
         """Average over 3 variants (original, slightly blurred, 3% border removed)."""
         w, h = img.size
         m = max(int(0.03 * min(w, h)), 1)
         variants = [img, img.filter(ImageFilter.GaussianBlur(1)), img.crop((m, m, w - m, h - m))]
-        x = torch.from_numpy(np.stack([to_square(v) for v in variants])).unsqueeze(1).to(self._device)
-        return float(torch.softmax(self._net(normalize(x, 0.449, 0.226)), 1)[:, 1].mean())
+        return float(self._network.probabilities(np.stack([to_square(v) for v in variants]))[:, 1].mean())
 
     def quality_problems(self, img: Image.Image) -> list[str]:
         q = self.quality
