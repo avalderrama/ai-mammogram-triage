@@ -1,7 +1,7 @@
-"""HTTP exposure of the MCP server: streamable HTTP plus API key, body limit, rate limit and CORS.
+"""HTTP exposure of the MCP server: streamable HTTP plus authentication, body limit, rate limit and CORS.
 
 Middlewares are pure ASGI so they never buffer responses and pass lifespan events through untouched.
-Order (outer to inner): CORS -> rate limit -> API key -> body limit -> MCP app.
+Order (outer to inner): CORS -> rate limit -> authentication -> body limit -> MCP app.
 """
 from __future__ import annotations
 
@@ -11,14 +11,17 @@ import time
 from collections import deque
 from collections.abc import Awaitable, Callable, MutableMapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
+import anyio.to_thread
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+
+from .access import ACCESS_JWT_HEADER
 
 Scope = MutableMapping[str, Any]
 Message = MutableMapping[str, Any]
@@ -43,6 +46,7 @@ class HttpOptions:
     allowed_origins: tuple[str, ...]
     allowed_hosts: tuple[str, ...]
     trust_proxy_headers: bool = False
+    access: AccessTokenVerifier | None = None
 
 
 async def _send_json(send: Send, status: int, body: dict, headers: dict[str, str] | None = None) -> None:
@@ -60,29 +64,43 @@ def _header(scope: Scope, name: bytes) -> str | None:
     return None
 
 
-class ApiKeyMiddleware:
-    """Requires `Authorization: Bearer <key>` or `X-API-Key: <key>` on every route except /health."""
+class AccessTokenVerifier(Protocol):
+    def verify(self, token: str) -> bool:
+        """Whether the identity token issued by the gateway in front of the server is valid. May block on I/O."""
 
-    def __init__(self, app: ASGIApp, api_key: str) -> None:
+
+class AuthenticationMiddleware:
+    """Requires, on every route except /health, either the API key (`Authorization: Bearer <key>` or
+    `X-API-Key: <key>`) or, when a verifier is configured, a valid Cloudflare Access token. The key serves technical
+    clients; browsers that went through Access are already identified by it and need no key."""
+
+    def __init__(self, app: ASGIApp, api_key: str, access: AccessTokenVerifier | None = None) -> None:
         if len(api_key) < 24:
             raise ValueError("The API key must have at least 24 characters.")
-        self._app, self._key = app, api_key.encode()
+        self._app, self._key, self._access = app, api_key.encode(), access
 
-    def _presented(self, scope: Scope) -> bytes | None:
+    def _presented_key(self, scope: Scope) -> bytes | None:
         auth = _header(scope, b"authorization")
         if auth and auth[:7].lower() == "bearer ":
             return auth[7:].strip().encode()
         key = _header(scope, b"x-api-key")
         return key.strip().encode() if key else None
 
+    async def _authenticated(self, scope: Scope) -> bool:
+        presented = self._presented_key(scope)
+        if presented is not None and hmac.compare_digest(presented, self._key):
+            return True
+        token = _header(scope, ACCESS_JWT_HEADER) if self._access else None
+        # Signature checks are CPU work and a key-set refresh is network I/O: keep both off the event loop.
+        return bool(token) and await anyio.to_thread.run_sync(self._access.verify, token.strip())
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         # CORS preflights are answered by the outer CORSMiddleware and never reach this point.
         if scope["type"] != "http" or _is_health_probe(scope):
             await self._app(scope, receive, send)
             return
-        presented = self._presented(scope)
-        if presented is None or not hmac.compare_digest(presented, self._key):
-            await _send_json(send, 401, {"error": "unauthorized", "message": "Missing or invalid API key."},
+        if not await self._authenticated(scope):
+            await _send_json(send, 401, {"error": "unauthorized", "message": "Missing or invalid credentials."},
                              {"WWW-Authenticate": 'Bearer realm="mammo-triage"'})
             return
         await self._app(scope, receive, send)
@@ -190,7 +208,7 @@ def create_http_app(mcp: MCPServer, options: HttpOptions) -> ASGIApp:
                                     max_request_body_size=options.max_body_bytes, transport_security=security)
     inner.router.routes.append(Route(HEALTH_PATH, _health, methods=["GET"]))
     app: ASGIApp = BodyLimitMiddleware(inner, options.max_body_bytes)
-    app = ApiKeyMiddleware(app, options.api_key)
+    app = AuthenticationMiddleware(app, options.api_key, options.access)
     app = RateLimitMiddleware(app, options.rate_limit_per_minute, options.trust_proxy_headers)
     return CORSMiddleware(app, allow_origins=list(options.allowed_origins), allow_methods=["GET", "POST", "OPTIONS"],
                           allow_headers=["authorization", "x-api-key", "content-type", "mcp-protocol-version",
