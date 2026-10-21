@@ -23,6 +23,7 @@ flowchart LR
 | `mammo-triage.service` | systemd unit, unprivileged user and hardening |
 | `nginx-mammotriage.conf` | One origin for the app and the server, on loopback |
 | `constraints.txt` | Package versions tested with the ONNX backend |
+| `deploy-entry.sh` | The only program the GitHub Actions deploy key can run on the VM (automatic deployment) |
 
 ## 1. Create the VM (Azure portal)
 
@@ -107,8 +108,80 @@ The API key stays for technical clients: read it on the VM with `sudo grep MAMMO
 
 ## 7. Close SSH
 
-Delete the SSH inbound rule of the VM's network security group. To deploy again, add it back for your IP for the
-duration of the deployment.
+Delete the SSH inbound rule of the VM's network security group. To run `push.sh` again, add it back for your IP
+(Source: **My IP address**, not *Any*) for the duration of the deployment.
+
+## Automatic deployment
+
+Once this is set up, merging to `main` deploys: `.github/workflows/deploy.yml` in this repository (the server) and in
+`ai-mammogram-triage-app` (the app) run after a green CI run on `main`. They reach SSH **through the tunnel**, so no
+port opens in Azure:
+
+```mermaid
+flowchart LR
+    GH["GitHub Actions<br/>(environment: production)"] -->|"cloudflared access ssh<br/>+ service token"| CF["Cloudflare Access<br/>ssh.mammotriage.com"]
+    CF -->|tunnel| CD["cloudflared"] -->|"ssh://localhost:22"| SSH["sshd: mammo-deploy<br/>forced command"]
+    SSH --> E["mammo-deploy<br/>(deploy-entry.sh)"]
+```
+
+Three locks guard it: Cloudflare Access admits only the service token, cloudflared checks the Access token again
+before reaching sshd, and the deploy key can run only `deploy-entry.sh`: `version`, `app <commit>` (checks the
+build's CSP, swaps the static files keeping the previous build's assets one more release for pages still open, rolls
+back if nginx does not serve the new ones) and `server <commit>` (installs
+the wheel built by the workflow, restarts the service and, if the install or `/health` fails, puts every package back
+as it was). Once the upload is in, it writes to `/var/lib/mammo-deploy/last-<operation>.log`, so a lost connection
+does not stop it halfway. It
+cannot touch the API key, the model bundle, nginx, the service unit, the tunnel or itself: those change only with
+`push.sh`. What it cannot prevent: the key exists to put new code on the VM, and pip installs it as root. Whoever can
+merge to `main` or read the `production` secrets can run code on the VM, so keep `main` protected.
+
+Setup, once:
+
+Do steps 1 to 6 **before** the workflows reach `main`: a Deploy run without its secrets fails at once.
+
+1. **Service token.** Zero Trust → Access controls → Service credentials → Service Tokens → Create: `github-deploy`.
+   Copy the Client ID and Client Secret (the secret is shown once). Tokens expire (one year by default): renew it
+   and update the two secrets before that date, or deployments stop.
+2. **SSH application.** Zero Trust → Access controls → Applications → Self-hosted: `ssh.mammotriage.com`, one policy
+   with action **Service Auth** that includes the `github-deploy` service token. Copy its AUD tag.
+3. **DNS and tunnel.** On your computer: `cloudflared tunnel route dns mammo-vm ssh.mammotriage.com`, then add this
+   rule to `config.yml` **before** the final `http_status:404`:
+
+   ```yaml
+     - hostname: ssh.mammotriage.com
+       service: ssh://localhost:22
+       originRequest:
+         access:
+           required: true
+           teamName: <team name>
+           audTag: [<AUD tag of the SSH application>]
+   ```
+
+4. **Deploy key.** `ssh-keygen -t ed25519 -N "" -C github-deploy -f github-deploy` in the private tunnel folder (on
+   Windows run it from `cmd`: PowerShell turns `-N ""` into a literal passphrase). `github-deploy.pub` stays in that
+   folder; `push.sh` uploads it.
+5. **VM.** Run `push.sh` once more, from a checkout that has `deploy-entry.sh` (with the SSH rule open for your IP,
+   then close it). Step 9 of `setup.sh` creates
+   the `mammo-deploy` account, installs `deploy-entry.sh` as `/usr/local/sbin/mammo-deploy` and prints the line for
+   `DEPLOY_KNOWN_HOSTS`.
+6. **GitHub**, in **each** of the two repositories: Settings → Environments → `production`, deployment branches
+   limited to `main` (this stops "Run workflow" on other branches; a run started by CI always counts as `main`, so
+   the workflow itself deploys only the current tip of `main` and only after this repository's own CI), with these
+   secrets:
+
+   | Secret | Value |
+   |---|---|
+   | `DEPLOY_SSH_KEY` | the private key `github-deploy` |
+   | `DEPLOY_KNOWN_HOSTS` | the line `setup.sh` printed (`ssh.mammotriage.com ssh-ed25519 AAAA...`) |
+   | `CF_ACCESS_CLIENT_ID` | the service token's Client ID |
+   | `CF_ACCESS_CLIENT_SECRET` | the service token's Client Secret |
+
+   To approve each deployment by hand, add yourself as a required reviewer of the environment.
+
+What a deployment does not cover: `setup.sh`, nginx, the service unit, `deploy-entry.sh` and the bundle (the
+workflow warns when `deploy/azure-vm/` changed). Running `push.sh` clears the deployed-commit records, so the next
+automatic deployment installs `main` again. Rotate the deploy key by replacing `github-deploy.pub`, running
+`push.sh` and updating `DEPLOY_SSH_KEY`; revoke all access at once by deleting the service token.
 
 ## Operation
 

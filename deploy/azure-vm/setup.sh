@@ -10,6 +10,9 @@ DOMAIN=${DOMAIN:-app.mammotriage.com}
 APP=/opt/mammo-triage
 WEB=/var/www/mammotriage
 ENV_FILE=/etc/mammo-triage/env
+DEPLOY_STATE=/var/lib/mammo-deploy
+# GitHub Actions reaches SSH through the tunnel at this name (README.md, "Automatic deployment").
+SSH_HOSTNAME=${SSH_HOSTNAME:-ssh.${DOMAIN#*.}}
 export DEBIAN_FRONTEND=noninteractive
 
 echo "== 1. Swap (2 GB safety margin for a 1 GB VM)"
@@ -46,6 +49,12 @@ PIP="$APP/venv/bin/pip"
 "$PIP" install -q -c "$HERE/constraints.txt" --upgrade "$HERE/ai-mammogram-triage.tar.gz" onnxruntime \
   opencv-python-headless pyclipper shapely six PyYAML tqdm
 "$PIP" install -q -c "$HERE/constraints.txt" --no-deps rapidocr-onnxruntime
+# The version installed here is the rollback point of the GitHub deployments (deploy-entry.sh). Their commit records
+# are cleared, so the next automatic deployment installs main again whatever changed since.
+install -d -m 755 "$DEPLOY_STATE"
+rm -rf "$DEPLOY_STATE/server-wheel.new" "$DEPLOY_STATE"/*.commit "$DEPLOY_STATE/app-assets.txt"
+"$PIP" wheel -q --no-deps -w "$DEPLOY_STATE/server-wheel.new" "$HERE/ai-mammogram-triage.tar.gz"
+rm -rf "$DEPLOY_STATE/server-wheel" && mv "$DEPLOY_STATE/server-wheel.new" "$DEPLOY_STATE/server-wheel"
 
 echo "== 4. Model bundle (private: VinDr data use agreement) readable only by the service"
 rm -rf "$APP/models.new" && install -d -m 750 -o root -g mammo "$APP/models.new"
@@ -110,7 +119,35 @@ if [ -f "$HERE/cloudflared/config.yml" ]; then
   systemctl restart cloudflared
 fi
 
-echo "== 9. Health check"
+echo "== 9. Deploy account for GitHub Actions (only when github-deploy.pub was uploaded)"
+if [ -f "$HERE/github-deploy.pub" ]; then
+  KEY_LINE=$(tr -d '\r' < "$HERE/github-deploy.pub" | grep -m1 -E '^ssh-ed25519 [A-Za-z0-9+/]+=*( [A-Za-z0-9._@-]+)?$' || true)
+  [ -n "$KEY_LINE" ] || { echo "github-deploy.pub must hold one ed25519 public key"; exit 1; }
+  sed "s/__DOMAIN__/$DOMAIN/g" "$HERE/deploy-entry.sh" > /usr/local/sbin/mammo-deploy.new
+  chown root:root /usr/local/sbin/mammo-deploy.new && chmod 755 /usr/local/sbin/mammo-deploy.new
+  mv /usr/local/sbin/mammo-deploy.new /usr/local/sbin/mammo-deploy
+  # No password ('*', not locked: sshd refuses locked accounts), a shell for the forced command, nothing else.
+  id mammo-deploy >/dev/null 2>&1 || useradd --create-home --shell /bin/sh mammo-deploy
+  usermod -p '*' mammo-deploy
+  SUDOERS=$(mktemp)
+  cat > "$SUDOERS" <<'EOF'
+# The GitHub Actions deploy key may run deploy-entry.sh as root and nothing else; it reads its operation from
+# SSH_ORIGINAL_COMMAND.
+Defaults:mammo-deploy env_keep += "SSH_ORIGINAL_COMMAND"
+mammo-deploy ALL=(root) NOPASSWD: /usr/local/sbin/mammo-deploy
+EOF
+  visudo -cqf "$SUDOERS"
+  install -m 440 -o root -g root "$SUDOERS" /etc/sudoers.d/mammo-deploy
+  rm -f "$SUDOERS"
+  # Owned by root, so the account cannot change which key gets in or what it runs.
+  install -d -m 755 -o root -g root /home/mammo-deploy/.ssh
+  echo "restrict,command=\"sudo -n /usr/local/sbin/mammo-deploy\" $KEY_LINE" > /home/mammo-deploy/.ssh/authorized_keys
+  chown root:root /home/mammo-deploy/.ssh/authorized_keys && chmod 644 /home/mammo-deploy/.ssh/authorized_keys
+  echo "DEPLOY_KNOWN_HOSTS (GitHub environment secret):"
+  awk -v host="$SSH_HOSTNAME" '{print host, $1, $2}' /etc/ssh/ssh_host_ed25519_key.pub
+fi
+
+echo "== 10. Health check"
 for _ in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:8765/health >/dev/null 2>&1; then break; fi
   sleep 1
