@@ -1,6 +1,7 @@
 """Configuration from environment variables (prefix MAMMO_) or a local .env file. Secrets never live in code."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -25,6 +26,10 @@ class Settings(BaseSettings):
     port: int = Field(default=8765, ge=1, le=65535)
     trust_proxy_headers: bool = False
     log_level: Literal["debug", "info", "warning", "error"] = "info"
+    # Cloudflare Access in front of the server: browsers authenticated by Access need no API key.
+    access_team_domain: str | None = Field(
+        default=None, description="Access team domain, e.g. myteam.cloudflareaccess.com. Set together with access_aud.")
+    access_aud: str | None = Field(default=None, description="AUD tag of the Access application.")
 
     @field_validator("allowed_origins", "allowed_hosts", mode="before")
     @classmethod
@@ -32,6 +37,25 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return tuple(v.strip() for v in value.split(",") if v.strip())
         return value
+
+    @field_validator("access_team_domain", mode="before")
+    @classmethod
+    def _team_host(cls, value: object) -> object:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        host = value.strip().lower().removeprefix("https://").rstrip("/")
+        if not re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", host):
+            raise ValueError("MAMMO_ACCESS_TEAM_DOMAIN must be a host name such as myteam.cloudflareaccess.com.")
+        return host
+
+    @field_validator("access_aud", mode="before")
+    @classmethod
+    def _blank_is_none(cls, value: object) -> object:
+        return (value.strip() or None) if isinstance(value, str) else value
+
+    @property
+    def access_configured(self) -> bool:
+        return self.access_team_domain is not None and self.access_aud is not None
 
     @property
     def exposed_beyond_loopback(self) -> bool:
