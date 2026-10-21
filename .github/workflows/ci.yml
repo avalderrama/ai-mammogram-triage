@@ -1,0 +1,57 @@
+# Tests, architecture contracts and a dependency audit on every pull request and on main.
+# The model weights are private, so integration tests (marker "integration") are not run here.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the minimum supported; 3.12 is what the production VM (Ubuntu 24.04) runs.
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        # onnxruntime only for the ONNX bundle checks; the rest of the ONNX extra (OCR) is not needed by unit tests.
+        run: |
+          python -m pip install --upgrade pip setuptools
+          pip install -e ".[dev]" onnxruntime
+      - name: Tests
+        run: pytest -q
+      - name: Architecture contracts (onion layers)
+        run: lint-imports
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Audit installed dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools pip-audit
+          pip install -e ".[onnx]"
+          pip-audit --skip-editable
