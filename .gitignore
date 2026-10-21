@@ -1,0 +1,29 @@
+# Secrets
+.env
+*.pem
+*accessKeys*.csv
+
+# Model weights and medical images are never committed
+*.pt
+*.pth
+*.onnx
+*.npy
+bundles/
+models*/
+data/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.tif
+*.tiff
+*.bmp
+*.dcm
+
+# Python
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+build/
+dist/
