@@ -3,7 +3,7 @@
 # then run setup.sh there. Run from any folder of this repository (Git Bash on Windows works):
 #   deploy/azure-vm/push.sh <vm-address> <onnx-bundle-dir> <app-dist-dir> [<tunnel-config-dir>]
 # The tunnel folder holds config.yml and the tunnel credentials (<id>.json), and optionally access.env with the
-# Cloudflare Access team domain and AUD tag; it never goes into git.
+# Cloudflare Access team domain and AUD tag and github-deploy.pub; it never goes into git.
 set -euo pipefail
 
 VM=${1:?vm address}
@@ -26,12 +26,15 @@ trap 'rm -rf "$STAGE"' EXIT
 git -C "$REPO" archive --format=tar.gz --prefix=ai-mammogram-triage/ -o "$STAGE/ai-mammogram-triage.tar.gz" HEAD
 tar -C "$DIST" -czf "$STAGE/app-dist.tar.gz" .
 tar -C "$BUNDLE" -czf "$STAGE/bundle.tar.gz" .
-cp "$HERE/setup.sh" "$HERE/mammo-triage.service" "$HERE/nginx-mammotriage.conf" "$HERE/constraints.txt" "$STAGE/"
+cp "$HERE/setup.sh" "$HERE/mammo-triage.service" "$HERE/nginx-mammotriage.conf" "$HERE/constraints.txt" \
+  "$HERE/deploy-entry.sh" "$STAGE/"
 if [ -n "$TUNNEL" ]; then
   mkdir "$STAGE/cloudflared"
   cp "$TUNNEL/config.yml" "$TUNNEL"/*.json "$STAGE/cloudflared/"
   # Optional Cloudflare Access settings (team domain and AUD tag) for the server, see ADR 0006.
   [ ! -f "$TUNNEL/access.env" ] || cp "$TUNNEL/access.env" "$STAGE/access.env"
+  # Optional public half of the GitHub Actions deploy key (README.md, "Automatic deployment").
+  [ ! -f "$TUNNEL/github-deploy.pub" ] || cp "$TUNNEL/github-deploy.pub" "$STAGE/github-deploy.pub"
 fi
 
 SSH=(ssh -i "$KEY" -o IdentitiesOnly=yes)

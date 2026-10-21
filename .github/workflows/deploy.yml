@@ -1,0 +1,148 @@
+# Deploys main to the production VM once CI has passed on it.
+#
+# GitHub Actions reaches the VM's SSH through the Cloudflare tunnel (ssh.mammotriage.com, an Access application that
+# admits only the deploy service token): no port is open in Azure. The deploy key can run only deploy-entry.sh on the
+# VM, which installs the server wheel, restarts the service, checks /health and rolls back if it does not answer.
+# The model bundle (private), nginx, the service unit, the entry script itself and the tunnel change only with
+# push.sh (deploy/azure-vm/README.md, "Automatic deployment").
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  # "Run workflow" in the Actions tab: redeploys the tip of main even when nothing changed.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  PUBLIC_HOST: app.mammotriage.com
+  SSH_HOST: ssh.mammotriage.com
+
+jobs:
+  # The build backend runs here, in a job of its own that holds no secret; the deploy job only receives the result.
+  build:
+    name: Build the wheel
+    # After a green CI run on a push to main (a pull request run never deploys), or when run by hand on main.
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+       && github.event.workflow_run.event == 'push'
+       && github.event.workflow_run.head_repository.full_name == github.repository)
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout the commit that passed CI
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SHA }}
+          persist-credentials: false
+      - name: Wheel and the tested package versions
+        run: |
+          python3 -m pip wheel --no-deps --wheel-dir upload .
+          cp deploy/azure-vm/constraints.txt upload/
+          tar -C upload -czf server.tar.gz .
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: server
+          path: server.tar.gz
+          retention-days: 1
+
+  deploy:
+    name: Deploy the server
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The secrets live in this environment (deployment branches: main). A workflow_run always counts as main, so what
+    # really stops a commit that is not main's tip from deploying is the tip check below: keep it first.
+    environment: production
+    steps:
+      - name: Checkout the commit that passed CI (history, to compare with the deployed one)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: SSH to the VM through the tunnel
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          HAS_TOKEN: ${{ secrets.CF_ACCESS_CLIENT_ID != '' && secrets.CF_ACCESS_CLIENT_SECRET != '' }}
+        run: |
+          # Without the token cloudflared would wait for a browser login until the job times out.
+          if [ "$HAS_TOKEN" != true ] || [ -z "$DEPLOY_SSH_KEY" ] || [ -z "$DEPLOY_KNOWN_HOSTS" ]; then
+            echo "::error::The production environment lacks its secrets: see deploy/azure-vm/README.md, \"Automatic deployment\" (server repository)."
+            exit 1
+          fi
+          curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg > /dev/null
+          echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' \
+            | sudo tee /etc/apt/sources.list.d/cloudflared.list > /dev/null
+          sudo apt-get update -q -o Dir::Etc::sourcelist=sources.list.d/cloudflared.list -o Dir::Etc::sourceparts=- \
+            -o APT::Get::List-Cleanup=0
+          sudo apt-get install -yq cloudflared
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf 'Host vm\n  HostName %s\n  User mammo-deploy\n  ProxyCommand cloudflared access ssh --hostname %%h\n  StrictHostKeyChecking yes\n  IdentitiesOnly yes\n  IdentityFile ~/.ssh/id_ed25519\n' \
+            "$SSH_HOST" > ~/.ssh/config
+
+      # Two merges in a row start two runs: an older one must not replace a newer version. A run that finds nothing
+      # but documentation changed since the deployed commit has nothing to do either (CI runs on every push).
+      - name: Is there anything to deploy?
+        id: plan
+        env:
+          # Read by cloudflared to pass Cloudflare Access.
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          tip="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [ "$tip" != "$SHA" ]; then
+            echo "main moved on to ${tip}; the run for that commit will deploy."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          deployed="$(timeout 120 ssh vm "version server")"
+          echo "Deployed: ${deployed:-unknown}"
+          if [ "$GITHUB_EVENT_NAME" = workflow_run ] && [ -n "$deployed" ] && git cat-file -e "${deployed}^{commit}" 2>/dev/null; then
+            files="$(git diff --no-renames --name-only "$deployed" "$SHA")"
+            if [ -z "$files" ] || ! grep -qvE '(\.md$|^docs/|^LICENSE$|^NOTICE$)' <<< "$files"; then
+              echo "Nothing but documentation changed since ${deployed}."
+              echo "deploy=false" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            if grep -qE '^deploy/azure-vm/' <<< "$files"; then
+              echo "::warning::deploy/azure-vm changed: this deploys the server code only; run push.sh for setup.sh, nginx, the service unit or deploy-entry.sh."
+            fi
+          fi
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.plan.outputs.deploy == 'true'
+        with:
+          name: server
+
+      - name: Deploy (installs, restarts, checks /health, rolls back on failure)
+        if: steps.plan.outputs.deploy == 'true'
+        env:
+          # Read by cloudflared to pass Cloudflare Access.
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: timeout 600 ssh vm "server ${SHA}" < server.tar.gz
+
+      - name: Check the public site
+        if: steps.plan.outputs.deploy == 'true'
+        # Without an Access session the site must send the browser to the Cloudflare Access login.
+        run: |
+          location="$(curl -s -o /dev/null -w '%{redirect_url}' "https://${PUBLIC_HOST}/mcp")"
+          case "$location" in
+            https://*.cloudflareaccess.com/*) echo "Access protects https://${PUBLIC_HOST}." ;;
+            *) echo "https://${PUBLIC_HOST}/mcp does not redirect to Cloudflare Access: ${location:-no redirect}" >&2; exit 1 ;;
+          esac

@@ -47,6 +47,14 @@ the **CI result** job always reports and is the only check the branch protection
 there; run them locally (`pytest -m integration`) before changing the model code. Dependabot
 (`.github/dependabot.yml`) opens weekly update pull requests for the Python packages and the GitHub Actions.
 
+## Continuous deployment
+
+`.github/workflows/deploy.yml` deploys `main` to production after a green CI run on it, so merging a pull request is
+the release. It reaches the VM through the Cloudflare tunnel (no open port), installs the server as a wheel, restarts
+it and rolls back if `/health` does not answer. A merge that only changes documentation deploys nothing; **Run
+workflow** in the Actions tab redeploys by hand. The model bundle, nginx, the service unit and the VM setup still
+change only with `push.sh`. Setup and security: [deploy/azure-vm/README.md](../deploy/azure-vm/README.md#automatic-deployment).
+
 ## Common changes
 
 ### Change the model or the thresholds
