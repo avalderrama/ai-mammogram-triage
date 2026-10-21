@@ -13,11 +13,11 @@ from mcp import types
 from mcp.server import MCPServer
 from pydantic import Field
 
-from mammo_application.analyses import (AnalysisResultDto, AnalyzeMammogramCommand, ImageQuery, MammogramCheckDto,
-                                        MaskedImageDto)
+from mammo_application.analyses import (AnalysisResultDto, AnalyzeMammogramCommand, HeatmapFormat, ImageQuery,
+                                        MammogramCheckDto, MaskedImageDto)
 from mammo_application.common import AppError, Result
 
-from .formatting import (DISCLAIMER, analysis_markdown, analysis_payload, check_markdown,
+from .formatting import (DISCLAIMER, analysis_markdown, analysis_payload, check_markdown, heatmap_images,
                          masked_regions_text)
 from .inputs import ImageInputError, image_from_arguments
 
@@ -135,7 +135,12 @@ def create_mcp_server(handlers: McpHandlers, options: McpOptions) -> MCPServer:
         views: Annotated[list[Literal["CC", "MLO", "unknown"]] | None, Field(
             default=None, description="View of each panel, left to right, e.g. ['CC','MLO'].")] = None,
         include_heatmap: Annotated[bool, Field(
-            default=True, description="Return a heatmap image per view when resolution allows (>=1500 px).")] = True,
+            default=True, description="Return the heatmap of each view when resolution allows (>=1500 px): one "
+            "image, or two with heatmap_format 'layers'.")] = True,
+        heatmap_format: Annotated[HeatmapFormat, Field(
+            default="combined", description="'combined': one image per view, the red areas drawn over the breast. "
+            "'layers': two images per view, the processed breast and then the red areas alone on a transparent "
+            "PNG of the same size, so a viewer can show or hide them.")] = "combined",
         response_format: ResponseFormat = "markdown",
         language: SummaryLanguage = "en",
     ) -> types.CallToolResult:
@@ -149,17 +154,19 @@ def create_mcp_server(handlers: McpHandlers, options: McpOptions) -> MCPServer:
         async def work() -> types.CallToolResult:
             command = AnalyzeMammogramCommand(load(image_base64, image_path), panel_count,
                                               tuple(sides) if sides else None, tuple(views) if views else None,
-                                              include_heatmap)
+                                              include_heatmap, heatmap_format)
             result = await run(analyze_handler.handle, command)
             if not result.is_success:
                 return _app_error(result.error)
-            payload = analysis_payload(result.value)
+            payload = analysis_payload(result.value, heatmap_format)
             text = (analysis_markdown(result.value, language) if response_format == "markdown"
                     else json.dumps(payload, indent=2))
             content: list = [types.TextContent(type="text", text=text)]
-            content += [types.ImageContent(type="image", data=base64.b64encode(view.heatmap.data).decode(),
-                                           mime_type=view.heatmap.media_type)
-                        for breast in result.value.breasts for view in breast.views if view.heatmap is not None]
+            # In the order of the views with has_heatmap; with layers, each view's breast and then its red areas.
+            content += [types.ImageContent(type="image", data=base64.b64encode(image.data).decode(),
+                                           mime_type=image.media_type)
+                        for breast in result.value.breasts for view in breast.views
+                        for image in heatmap_images(view, heatmap_format)]
             return types.CallToolResult(content=content, structured_content=payload)
         return await guarded("mammo_analyze_mammogram", work)
 

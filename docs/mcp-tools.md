@@ -31,6 +31,7 @@ Masks personal data, discards the views that are not mammograms and gives a leve
 | `sides` | list of `R`, `L`, `unknown` (one per view, left to right) | `unknown` for every view |
 | `views` | list of `CC`, `MLO`, `unknown` | `unknown` |
 | `include_heatmap` | boolean | `true` |
+| `heatmap_format` | `combined` or `layers` | `combined` |
 
 If you send `sides` or `views`, their length must match the number of views.
 
@@ -41,7 +42,10 @@ There is no automatic side detection. Views are combined into one breast only wh
 **Successful response**
 
 - `content[0]`: the text summary (in `language`), or the JSON if `response_format` is `json`.
-- `content[1..]`: one PNG per heatmap, in the same order as the views with `has_heatmap: true`.
+- `content[1..]`: the heatmap images, in the same order as the views with `has_heatmap: true`. With
+  `heatmap_format: "combined"`, one PNG per view: the red areas drawn over the processed breast. With `"layers"`,
+  two PNGs per view of the same size: the processed breast (grayscale), then the red areas alone on a transparent
+  background, so a viewer can show or hide them. `structuredContent.heatmap_format` says which one was used.
 - `structuredContent`: the full result, always in English.
 
 `label` is `right`, `left` or `panel N`.
@@ -63,6 +67,7 @@ There is no automatic side detection. Views are combined into one breast only wh
   "rejected_panels": [],
   "masked_text_regions": 0,
   "model_version": "1.0.0",
+  "heatmap_format": "combined",
   "disclaimer": "Indicative result from a research tool…"
 }
 ```

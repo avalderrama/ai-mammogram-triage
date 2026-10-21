@@ -7,11 +7,13 @@ from mammo_mcp import McpHandlers
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 HEATMAP = EncodedImage(b"\x89PNG\r\n\x1a\nheat", "image/png")
+OVERLAY = EncodedImage(b"\x89PNG\r\n\x1a\nred", "image/png")
 
 
-def analysis(heatmap=True) -> AnalysisResultDto:
+def analysis(heatmap=True, layers=False) -> AnalysisResultDto:
     view = ViewResultDto(1, "R", "MLO", {"birads_1_2": 0.1, "birads_3": 0.1, "birads_4_5": 0.8}, ["blurry"],
-                         HEATMAP if heatmap else None, None if heatmap else "low_resolution")
+                         HEATMAP if heatmap else None, None if heatmap else "low_resolution",
+                         heatmap_overlay=OVERLAY if heatmap and layers else None)
     breast = BreastResultDto("R", "R", "high_priority", "fused", 0.9, 0.95, "BI-RADS 4-5",
                              {"birads_1_2": 0.1, "birads_3": 0.1, "birads_4_5": 0.8}, ["blurry"], [view])
     return AnalysisResultDto("high_priority", [breast], [], 2, "1.0.0")

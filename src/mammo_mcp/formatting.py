@@ -4,7 +4,8 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Literal
 
-from mammo_application.analyses import AnalysisResultDto, MammogramCheckDto
+from mammo_application.abstractions import EncodedImage
+from mammo_application.analyses import AnalysisResultDto, HeatmapFormat, MammogramCheckDto, ViewResultDto
 
 Language = Literal["en", "es"]
 
@@ -85,12 +86,25 @@ def masked_regions_text(count: int, language: Language = "en") -> str:
     return t["masked_one"] if count == 1 else t["masked_many"].format(n=count)
 
 
-def analysis_payload(result: AnalysisResultDto) -> dict:
+def heatmap_images(view: ViewResultDto, heatmap_format: HeatmapFormat) -> tuple[EncodedImage, ...]:
+    """The image blocks of one view: the combined heatmap, or the breast and then its red areas. With layers, both or
+    none, so a client pairing the blocks by position never shifts them onto another view."""
+    if view.heatmap is None:
+        return ()
+    if heatmap_format == "layers":
+        return (view.heatmap, view.heatmap_overlay) if view.heatmap_overlay is not None else ()
+    return (view.heatmap,)
+
+
+def analysis_payload(result: AnalysisResultDto, heatmap_format: HeatmapFormat = "combined") -> dict:
     """JSON-safe structured content (heatmaps travel as separate image content blocks). Always in English."""
     data = asdict(result)
-    for breast in data["breasts"]:
-        for view in breast["views"]:
-            view["has_heatmap"] = view.pop("heatmap") is not None
+    for breast, breast_dto in zip(data["breasts"], result.breasts):
+        for view, view_dto in zip(breast["views"], breast_dto.views):
+            del view["heatmap"], view["heatmap_overlay"]
+            view["has_heatmap"] = bool(heatmap_images(view_dto, heatmap_format))
+    # How many image blocks each view with has_heatmap brings: one ("combined") or two ("layers").
+    data["heatmap_format"] = heatmap_format
     data["disclaimer"] = DISCLAIMER
     return data
 

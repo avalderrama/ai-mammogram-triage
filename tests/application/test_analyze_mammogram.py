@@ -40,16 +40,19 @@ class FakeGate:
 
 class FakeClassifier:
     def __init__(self, patch=True):
-        self.patch, self.heatmap_requested = patch, []
+        self.patch, self.heatmap_requested, self.layers_requested = patch, [], []
 
-    def predict(self, panel, with_heatmap):
+    def predict(self, panel, with_heatmap, heatmap_layers=False):
         self.heatmap_requested.append(with_heatmap)
+        self.layers_requested.append(heatmap_layers)
+        heatmap = with_heatmap and self.patch
         return PanelPrediction(BiradsProbabilities.of(0.2, 0.2, 0.6), SuspicionScores.of(0.6, 0.8),
                                SuspicionScores.of(0.7, 0.9) if self.patch else None,
-                               EncodedImage(b"heat", "image/png") if with_heatmap and self.patch else None,
+                               EncodedImage(b"breast" if heatmap_layers else b"heat", "image/png") if heatmap else None,
                                None if self.patch else "low_resolution",
                                regions=(SuspiciousRegion(0.6, 0.1, 0.15, 0.12, 0.9, "anterior", "upper"),)
-                               if self.patch else ())
+                               if self.patch else (),
+                               heatmap_overlay=EncodedImage(b"red", "image/png") if heatmap and heatmap_layers else None)
 
 
 class FakeFuser:
@@ -131,6 +134,21 @@ def test_heatmap_is_not_requested_when_disabled():
     classifier = FakeClassifier()
     handler(classifier=classifier).handle(AnalyzeMammogramCommand(PNG, include_heatmap=False))
     assert classifier.heatmap_requested == [False, False]
+
+
+def test_heatmap_is_combined_unless_layers_are_asked_for():
+    classifier = FakeClassifier()
+    view = handler(classifier=classifier).handle(AnalyzeMammogramCommand(PNG)).value.breasts[0].views[0]
+    assert classifier.layers_requested == [False, False]
+    assert view.heatmap.data == b"heat" and view.heatmap_overlay is None
+
+
+def test_heatmap_layers_reach_each_view():
+    classifier = FakeClassifier()
+    result = handler(classifier=classifier).handle(AnalyzeMammogramCommand(PNG, heatmap_format="layers"))
+    view = result.value.breasts[0].views[0]
+    assert classifier.layers_requested == [True, True]
+    assert view.heatmap.data == b"breast" and view.heatmap_overlay.data == b"red"
 
 
 def test_low_resolution_explains_why_there_is_no_heatmap():

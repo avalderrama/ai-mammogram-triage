@@ -1,9 +1,16 @@
 """Backend-independent model logic with fake networks (no weights, no PyTorch, no ONNX Runtime)."""
+import hashlib
+import io
+import threading
+
 import numpy as np
 import pytest
 from PIL import Image
 
-from mammo_infrastructure.ml.classifiers import GlobalEnsemble, PatchScanner
+from mammo_application.abstractions import EncodedImage
+from mammo_infrastructure._adapters import _BiradsClassifier
+from mammo_infrastructure.ml.classifiers import (GlobalEnsemble, PatchScanner, render_heatmap,
+                                                 render_heatmap_layers)
 from mammo_infrastructure.ml.constants import PATCH, STRIDE
 from mammo_infrastructure.ml.gate_model import GateModel
 from mammo_infrastructure.ml.inference import LoadedNetwork, normalize, softmax
@@ -80,3 +87,37 @@ def test_softmax_and_normalization_match_training():
     x = normalize(np.array([[[0, 255]]], np.uint8), 0.5, 0.25)
     assert x.shape == (1, 1, 1, 2) and x.dtype == np.float32
     np.testing.assert_allclose(x[0, 0, 0], [-2.0, 2.0])
+
+
+def test_heatmap_layers_compose_into_the_combined_heatmap():
+    _, _, heat, processed = PatchScanner(BrightnessNetwork(), 16).scan(breast())
+    combined = np.asarray(render_heatmap(processed, heat), np.float32)
+    base, red = render_heatmap_layers(processed, heat)
+    assert base.mode == "L" and red.mode == "RGBA" and base.size == red.size == (combined.shape[1], combined.shape[0])
+    composed = np.asarray(Image.alpha_composite(base.convert("RGBA"), red).convert("RGB"), np.float32)
+    # Only rounding: the 8-bit opacity and the resampling of nearly transparent edges (a few levels out of 255).
+    assert np.abs(composed - combined).max() <= 5
+    alpha = np.asarray(red)[..., 3]
+    assert alpha.max() == round(0.75 * 255) and alpha.min() == 0  # never fully opaque; transparent where not suspicious
+
+
+def test_combined_heatmap_is_unchanged():
+    """Pinned before the heatmap layers were added: clients that do not ask for layers get the same image."""
+    _, _, heat, processed = PatchScanner(BrightnessNetwork(), 16).scan(breast())
+    digest = hashlib.sha256(render_heatmap(processed, heat).tobytes()).hexdigest()
+    assert digest == "4389feacd358dbafee9812f2fef7ac0f5d1775e3ddfd9ef990e03167a504c533"
+
+
+@pytest.mark.parametrize("layers", [False, True])
+def test_classifier_returns_the_combined_heatmap_or_two_layers_of_the_same_size(layers):
+    buffer = io.BytesIO()
+    Image.fromarray(breast()).save(buffer, "PNG")
+    classifier = _BiradsClassifier(GlobalEnsemble([(BrightnessNetwork(), 512)]),
+                                   PatchScanner(BrightnessNetwork(), 16), 1500, threading.Lock())
+    prediction = classifier.predict(EncodedImage(buffer.getvalue(), "image/png"), True, heatmap_layers=layers)
+    heatmap = Image.open(io.BytesIO(prediction.heatmap.data))
+    if layers:
+        overlay = Image.open(io.BytesIO(prediction.heatmap_overlay.data))
+        assert (heatmap.mode, overlay.mode) == ("L", "RGBA") and heatmap.size == overlay.size
+    else:
+        assert heatmap.mode == "RGB" and prediction.heatmap_overlay is None

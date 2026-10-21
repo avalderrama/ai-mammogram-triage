@@ -50,15 +50,37 @@ class PatchScanner:
         return float(np.sort(p[:, 2])[-k:].mean()), float(np.sort(1 - p[:, 0])[-k:].mean()), heat, a
 
 
-def render_heatmap(breast: np.ndarray, heat: np.ndarray, out_height: int = 768) -> Image.Image:
-    """Overlay of the suspicious areas (red, more opaque = more suspicious) on the processed breast."""
+HEATMAP_RED = np.array([217, 58, 43], np.float32)
+
+
+def _heatmap_alpha(breast: np.ndarray, heat: np.ndarray) -> np.ndarray:
+    """Opacity of the red per pixel of the processed breast: more suspicious = more opaque (at most 0.75)."""
     full = np.zeros(breast.shape, np.float32)
     up = np.kron(heat, np.ones((STRIDE, STRIDE), np.float32))
     hh, ww = min(up.shape[0], breast.shape[0] - PATCH // 4), min(up.shape[1], breast.shape[1] - PATCH // 4)
     full[PATCH // 4:PATCH // 4 + hh, PATCH // 4:PATCH // 4 + ww] = up[:hh, :ww]
-    alpha = np.clip((full - 0.2) / 0.6, 0, 0.75)[..., None]
-    base = np.repeat(breast[..., None].astype(np.float32), 3, axis=2)
-    red = np.array([217, 58, 43], np.float32)
-    rgb = (base * (1 - alpha) + red * alpha).astype(np.uint8)
-    img = Image.fromarray(rgb)
+    return np.clip((full - 0.2) / 0.6, 0, 0.75)
+
+
+def _scaled(img: Image.Image, out_height: int) -> Image.Image:
     return img.resize((round(img.width * out_height / img.height), out_height), Image.BILINEAR)
+
+
+def render_heatmap(breast: np.ndarray, heat: np.ndarray, out_height: int = 768) -> Image.Image:
+    """Overlay of the suspicious areas (red, more opaque = more suspicious) on the processed breast."""
+    alpha = _heatmap_alpha(breast, heat)[..., None]
+    base = np.repeat(breast[..., None].astype(np.float32), 3, axis=2)
+    rgb = (base * (1 - alpha) + HEATMAP_RED * alpha).astype(np.uint8)
+    return _scaled(Image.fromarray(rgb), out_height)
+
+
+def render_heatmap_layers(breast: np.ndarray, heat: np.ndarray,
+                          out_height: int = 768) -> tuple[Image.Image, Image.Image]:
+    """The same heatmap as two images of the same size: the processed breast (grayscale) and the red areas alone,
+    transparent elsewhere, so a viewer can show or hide them. Drawn one over the other they give render_heatmap."""
+    alpha = np.round(_heatmap_alpha(breast, heat) * 255).astype(np.uint8)
+    red = np.empty((*breast.shape, 4), np.uint8)
+    red[..., :3] = HEATMAP_RED.astype(np.uint8)
+    red[..., 3] = alpha
+    return (_scaled(Image.fromarray(breast.astype(np.uint8)), out_height),
+            _scaled(Image.fromarray(red), out_height))

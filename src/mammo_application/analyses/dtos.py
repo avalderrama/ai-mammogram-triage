@@ -2,8 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from mammo_application.abstractions import EncodedImage
+
+# "combined": the red areas drawn over the breast (one image per view). "layers": the breast and the red areas as two
+# images of the same size, so a client can show or hide the red areas.
+HeatmapFormat = Literal["combined", "layers"]
 
 
 @dataclass(frozen=True)
@@ -13,6 +18,7 @@ class AnalyzeMammogramCommand:
     sides: tuple[str, ...] | None = None     # per panel: "R", "L" or "unknown"
     views: tuple[str, ...] | None = None     # per panel: "CC", "MLO" or "unknown"
     include_heatmap: bool = True
+    heatmap_format: HeatmapFormat = "combined"
 
 
 @dataclass(frozen=True)
@@ -32,6 +38,8 @@ class ViewResultDto:
     heatmap_unavailable_reason: str | None
     # Most suspicious windows of the patch model; boxes normalized to the heatmap image. Empty without patches.
     regions: list[dict] = field(default_factory=list)
+    # Only with heatmap_format "layers": the red areas, transparent, the same size as heatmap (then the breast alone).
+    heatmap_overlay: EncodedImage | None = None
 
 
 @dataclass(frozen=True)
