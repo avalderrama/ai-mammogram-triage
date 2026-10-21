@@ -1,5 +1,7 @@
 # Tests, architecture contracts and a dependency audit on every pull request and on main.
 # The model weights are private, so integration tests (marker "integration") are not run here.
+# Changes that only touch documentation skip the tests; "CI result" always reports, so it is the one check that the
+# branch protection of main requires (a required check that never runs would block the pull request).
 name: CI
 
 on:
@@ -15,8 +17,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        # Documentation only: Markdown files, docs/, LICENSE and NOTICE. Anything else, or a diff that cannot be
+        # computed (first push of a branch), counts as code.
+        run: |
+          if files=$(git diff --name-only "$BASE" "$GITHUB_SHA" 2>/dev/null) \
+             && ! grep -qvE '(\.md$|^docs/|^LICENSE$|^NOTICE$)' <<< "$files"; then
+            echo "Documentation only:"; echo "$files"
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: Tests (Python ${{ matrix.python }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -43,6 +71,8 @@ jobs:
 
   audit:
     name: Dependency audit
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -55,3 +85,15 @@ jobs:
           python -m pip install --upgrade pip setuptools pip-audit
           pip install -e ".[onnx]"
           pip-audit --skip-editable
+
+  result:
+    name: CI result
+    if: always()
+    needs: [changes, test, audit]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed or was skipped for a documentation-only change
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: jq -e 'all(.[]; .result == "success" or .result == "skipped") and .changes.result == "success"' <<< "$NEEDS"
