@@ -26,7 +26,7 @@ This document explains how the server protects patients and itself, and which ri
 | CSRF and *DNS rebinding* | CORS limited to the app's origins; `Host` and `Origin` validated | `TransportSecuritySettings`, `CORSMiddleware` |
 | `/health` as a back door | Only `GET` and `HEAD` are public; any other method requires the key | `_is_health_probe` |
 | Information leaks in errors | Unexpected errors return a generic `internal_error`; the traceback goes only to the log, without the arguments. The access log is off | `mammo_mcp/server.py`, `__main__.py` |
-| Tampered weights | The SHA-256 manifest requires every file, and weights are loaded with `torch.load(weights_only=True)`, so no code runs | `bundle.py`, `ml/networks.py` |
+| Tampered weights | The SHA-256 manifest requires every file of the bundle's format. ONNX files are a graph of operators with no code; PyTorch weights are loaded with `torch.load(weights_only=True)`. Either way, no code from the bundle runs | `bundle.py`, `ml/onnx_backend.py`, `ml/torch_backend.py` |
 | Secrets in the repository | `.env` is ignored; `.gitignore` excludes weights and images | `.gitignore` |
 
 There were two rounds of security review. The findings and their fixes are in the project's session report.
@@ -36,7 +36,10 @@ There were two rounds of security review. The findings and their fixes are in th
 - **Shared key.** If it leaks, anyone can use the service. Mitigations:
   - rotate it with `mammo-triage new-key`;
   - for anything beyond a short trial, put Cloudflare Access in front of the tunnel.
-- **OCR is not perfect.** It may miss very faint or very large text.
+- **OCR is not perfect.** It may miss very faint or very large text. On fake personal data drawn over 24
+  mammograms, RapidOCR (ONNX bundle) hid 60 of 60 lines and EasyOCR (PyTorch bundle) 58 of 60. RapidOCR reads large
+  images in full-resolution tiles: on a 12 MP image it hid text down to 0.3 % of the image height. On real figures it
+  sometimes misses short view labels such as "LMLO" or a panel letter.
 - **EXIF metadata.** Photos arrive with it (device, date, sometimes GPS). The server does not store it.
 - **Python dependencies with version ranges.** For a reproducible deployment, generate a lock file with *hashes*.
 - **Not a medical device.** It has no regulatory approval and no clinical validation.

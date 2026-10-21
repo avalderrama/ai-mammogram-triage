@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .classifiers import PATCH, STRIDE
+from .constants import PATCH, STRIDE
 
 TISSUE_LEVEL = 25
 

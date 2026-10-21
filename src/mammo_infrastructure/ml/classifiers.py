@@ -1,69 +1,48 @@
-"""Global BI-RADS classifiers (512 + 1024 px ensemble) and the 2048 px patch scanner."""
+"""Global BI-RADS classifiers (512 + 1024 px ensemble) and the 2048 px patch scanner.
+
+Backend-independent: the networks are injected (PyTorch or ONNX Runtime, see inference.Network).
+"""
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
-import torch
-import torch.nn.functional as F
 from PIL import Image
 
-from .networks import load_network, normalize
+from .constants import PATCH, PATCH_HEIGHT, STRIDE
+from .inference import Network
 from .preprocessing import preprocess
-
-PATCH, STRIDE, PATCH_HEIGHT = 256, 128, 2048
 
 
 class GlobalEnsemble:
     """Average of the 512 px and 1024 px models: [P(1-2), P(3), P(4-5)]."""
 
-    def __init__(self, paths: list[Path], device: torch.device) -> None:
-        self._device = device
-        self._models = []
-        for p in paths:
-            net, meta = load_network(p, 3, device)
-            self._models.append((net, meta["height"], meta["mean"], meta["std"]))
+    def __init__(self, networks: list[tuple[Network, int]]) -> None:
+        self._networks = networks  # (network, input height)
 
-    @torch.no_grad()
     def probabilities(self, gray: np.ndarray) -> np.ndarray:
-        out = []
-        for net, height, mean, std in self._models:
-            x = torch.from_numpy(preprocess(gray, height)).unsqueeze(0).unsqueeze(0).to(self._device)
-            with torch.autocast(self._device.type, enabled=self._device.type == "cuda"):
-                logits = net(normalize(x, mean, std))
-            out.append(F.softmax(logits.float(), 1).cpu().numpy()[0])
-        return np.mean(out, axis=0)
+        return np.mean([net.probabilities(preprocess(gray, height)[None])[0] for net, height in self._networks],
+                       axis=0)
 
 
 class PatchScanner:
     """Slides 256 px windows (stride 128) over the breast at 2048 px. Scores = mean of the 2 most
-    suspicious windows: P(4-5) and 'lesion' = 1 - P(normal). Also returns the P(4-5) grid."""
+    suspicious windows: P(4-5) and 'lesion' = 1 - P(normal). Also returns the P(4-5) grid.
+    batch_size only trades speed for memory: the result does not depend on it."""
 
-    def __init__(self, path: Path, device: torch.device) -> None:
-        self._device = device
-        self._net, meta = load_network(path, 3, device)
-        self._mean, self._std = meta["mean"], meta["std"]
+    def __init__(self, network: Network, batch_size: int) -> None:
+        self._network, self._batch_size = network, batch_size
 
-    @torch.no_grad()
     def scan(self, gray: np.ndarray, top_k: int = 2) -> tuple[float, float, np.ndarray, np.ndarray]:
         a = preprocess(gray, PATCH_HEIGHT)
         ys = range(0, a.shape[0] - PATCH + 1, STRIDE)
         xs = range(0, a.shape[1] - PATCH + 1, STRIDE)
-        coords, tiles = [], []
-        for y in ys:
-            for x in xs:
-                t = a[y:y + PATCH, x:x + PATCH]
-                if (t > 25).mean() >= 0.3:
-                    coords.append((y, x))
-                    tiles.append(t)
+        coords = [(y, x) for y in ys for x in xs if (a[y:y + PATCH, x:x + PATCH] > 25).mean() >= 0.3]
         heat = np.zeros((len(ys), len(xs)), np.float32)
-        if not tiles:
+        if not coords:
             return 0.0, 0.0, heat, a
         probs = []
-        for i in range(0, len(tiles), 96):
-            b = torch.from_numpy(np.stack(tiles[i:i + 96])).unsqueeze(1).to(self._device)
-            with torch.autocast(self._device.type, enabled=self._device.type == "cuda"):
-                probs.append(F.softmax(self._net(normalize(b, self._mean, self._std)).float(), 1).cpu().numpy())
+        for i in range(0, len(coords), self._batch_size):
+            tiles = np.stack([a[y:y + PATCH, x:x + PATCH] for y, x in coords[i:i + self._batch_size]])
+            probs.append(self._network.probabilities(tiles))
         p = np.concatenate(probs)
         for (y, x), q in zip(coords, p):
             heat[y // STRIDE, x // STRIDE] = q[2]

@@ -1,4 +1,5 @@
-"""Infrastructure ring: PyTorch, EasyOCR and image adapters implementing the application ports."""
+"""Infrastructure ring: inference backends (ONNX Runtime + RapidOCR, or PyTorch + EasyOCR) and image adapters
+implementing the application ports."""
 from .bundle import BundleError
 from .registration import Ports, create_ports
 

@@ -23,10 +23,10 @@ pytest
 | `tests/domain` | Values, triage policy and grouping by breast |
 | `tests/application` | Use cases with fake ports |
 | `tests/presentation` | MCP tools with a real in-process client, and HTTP security (401, 413, 429, CORS, `Host`, `/health`) |
-| `tests/infrastructure` | Decoding (EXIF, pixel floods, formats) |
+| `tests/infrastructure` | Decoding (EXIF, pixel floods, formats), suspicious regions, model logic with fake networks (patch batches do not change scores), masking rules with a fake OCR engine, and bundle verification for both formats |
 | `tests/host` | Insecure configurations that prevent startup |
-| `tests/architecture` | `lint-imports` contracts, and that only `mammo_host` imports the infrastructure |
-| `tests/integration` | Real models through HTTP and MCP. Run separately |
+| `tests/architecture` | `lint-imports` contracts; only `mammo_host` imports the infrastructure; only each backend module imports its libraries; starting the host loads no inference library |
+| `tests/integration` | Real models through HTTP and MCP, and parity between the ONNX and PyTorch backends. Run separately |
 
 For the integration tests:
 
@@ -34,16 +34,20 @@ For the integration tests:
 pytest -m integration
 ```
 
-They need `MAMMO_MODELS_DIR` and `MAMMO_TEST_IMAGES_DIR`, a local library of test images that is not published.
+They need a local library of test images that is not published (`MAMMO_TEST_IMAGES_DIR`) and the bundles:
+
+- `test_real_models.py`: `MAMMO_MODELS_DIR`, in either format (run it once per format).
+- `test_backend_parity.py`: `MAMMO_TORCH_MODELS_DIR` and `MAMMO_ONNX_MODELS_DIR`, the same bundle in both formats. It needs both extras installed (`".[onnx,torch,dev]"`). PyTorch runs on CPU in float32, so the gate, the probabilities, the patch scores, the heatmap presence and the regions must agree within 0.001. The patch cases (views of at least 1500 px) fail if the patch scanner stops running on them. Both backends must also keep reference outputs recorded from the PyTorch code before the backends were split, which catches a change in the shared numpy code. Finally, the ONNX masker must hide fake personal data, including 16 px text on a 4000 px image.
 
 ## Common changes
 
 ### Change the model or the thresholds
 
 1. In the training repository, train and calibrate (`calibrate_fusion.py`).
-2. Export the bundle with `export_bundle.py --out bundles/v2`.
-3. Point `MAMMO_MODELS_DIR` to the new bundle. No code change is needed if the model outputs and the format of
-   `fusion_calibration.json` do not change.
+2. Export the bundle with `export_bundle.py --out bundles/v2`, then the ONNX version with
+   `export_onnx.py --bundle bundles/v2 --out bundles/v2-onnx` (it checks each network against PyTorch on real images).
+3. Point `MAMMO_MODELS_DIR` to the new bundle and run the parity tests. No code change is needed if the model
+   outputs and the format of `fusion_calibration.json` do not change.
 4. If the preprocessing changes, `ml/preprocessing.py` must stay **identical** to `common.preprocess` in the
    training repository.
 

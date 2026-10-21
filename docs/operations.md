@@ -6,14 +6,25 @@ when something fails.
 ## 1. Requirements
 
 - Windows 10/11 or Linux, with Python 3.11.
-- NVIDIA GPU with CUDA (tested on an RTX 3050 with 6 GB). Without a GPU it runs on the CPU, but each analysis takes
-  much longer.
-- The **model bundle** (~65 MB) exported by the training repository:
-  - `manifest.json`;
-  - `gate.pt`, `global_512.pt`, `global_1024.pt` and `patch_2048.pt`;
-  - `fusion_calibration.json`.
+- The **model bundle** (~65 MB) exported by the training repository, in one of the two formats below.
 - For the remote pilot, `cloudflared` (Cloudflare's official executable). Verify its SHA-256 and its signature when
   you download it.
+
+Both bundle formats give the same results ([ADR 0005](adr/0005-onnx-runtime-backend.md)). Measured with the full
+HTTP + MCP app on a 4-core CPU, over a viewer capture, a multi-view figure, two 1630×2048 views and a 12 MP photo:
+
+| | ONNX bundle (recommended) | PyTorch bundle |
+|---|---|---|
+| Files | `gate.onnx`, `global_512.onnx`, `global_1024.onnx`, `patch_2048.onnx`, `onnx_meta.json` | `gate.pt`, `global_512.pt`, `global_1024.pt`, `patch_2048.pt` |
+| Always | `manifest.json` (declares `"format"`), `fusion_calibration.json` | the same (no `"format"` means PyTorch) |
+| Exported with | `export_bundle.py` then `export_onnx.py` | `export_bundle.py` |
+| Runs on | CPU (ONNX Runtime + RapidOCR) | NVIDIA GPU with CUDA, or CPU (PyTorch + EasyOCR) |
+| Startup | ~1 s | ~6 s |
+| Peak memory | ~0.6 GB (the process rests at ~0.3 GB) | ~5 GB on CPU (and stays there) |
+| Time per image | 1–3 s; ~7 s for a 12 MP photo (its text is read in tiles) | 1–10 s on CPU; much less with a GPU |
+
+A server with the ONNX bundle fits in a 1 GB VM: add a 2 GB swap file as a safety margin and measure it there before
+real use.
 
 ## 2. Installation
 
@@ -21,15 +32,29 @@ when something fails.
 python -m venv .venv
 ```
 
+**ONNX bundle:**
+
+```bash
+.venv\Scripts\pip install -e ".[onnx]"
+```
+
+RapidOCR depends on `opencv-python`, which needs `libGL` on Linux servers. On a headless server, install
+`opencv-python-headless` and RapidOCR without its dependencies, or install `libgl1` with the system's package manager.
+RapidOCR's models ship inside the package: nothing is downloaded at run time.
+
+**PyTorch bundle:**
+
 ```bash
 .venv\Scripts\pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu126
 ```
 
 ```bash
-.venv\Scripts\pip install -e ".[dev]"
+.venv\Scripts\pip install -e ".[torch]"
 ```
 
 On first use, EasyOCR downloads its text detection models.
+
+Add `dev` to the extras (`".[onnx,dev]"`) to run the tests.
 
 ## 3. Configuration (`.env` or environment variables)
 
@@ -37,7 +62,7 @@ On first use, EasyOCR downloads its text detection models.
 |---|---|---|
 | `MAMMO_MODELS_DIR` | (required) | Folder of the model bundle |
 | `MAMMO_API_KEY` | (required for HTTP) | Shared key, ≥ 24 characters. Generate it with `mammo-triage new-key` |
-| `MAMMO_DEVICE` | `auto` | `auto`, `cuda` or `cpu` |
+| `MAMMO_DEVICE` | `auto` | `auto`, `cuda` or `cpu`. PyTorch bundles only: ONNX bundles run on CPU and reject `cuda` |
 | `MAMMO_VERIFY_BUNDLE` | `true` | Checks the SHA-256 of the weights at startup |
 | `MAMMO_MAX_IMAGE_MB` | `10` | Maximum image size |
 | `MAMMO_RATE_LIMIT_PER_MINUTE` | `60` | MCP requests per client per minute. One analysis costs about 3 |
@@ -126,13 +151,17 @@ The app messages below are the English texts; the Spanish option shows the equiv
 | `MAMMO_API_KEY is required…` at startup | The key is missing, or shorter than 24 characters | Run `mammo-triage new-key` and put it in `.env` |
 | `…TRUST_PROXY_HEADERS is false` at startup | There is a public host in `MAMMO_ALLOWED_HOSTS` | Set `MAMMO_TRUST_PROXY_HEADERS=true` |
 | `Checksum mismatch for …` | Corrupt or modified bundle | Export it again from the training repository |
+| `…is missing: onnx_meta.json` or `gate.onnx` | ONNX bundle copied without all its files | Copy the whole folder written by `export_onnx.py` |
+| `ONNX bundles run on CPU…` | `MAMMO_DEVICE=cuda` with an ONNX bundle | Set `MAMMO_DEVICE=auto`, or use the PyTorch bundle for GPU |
+| `…is in 'torch' format, but its backend is not installed` (or `'onnx'`) | The extra for the bundle's format is not installed | `pip install -e ".[torch]"` or `".[onnx]"`, as the message says |
+| `onnx_meta.json … lacks the metadata of: …` | Incomplete or hand-edited ONNX bundle | Export it again with `export_onnx.py` |
 | The app says "The server rejects this connection" (421) | The tunnel host is not in `MAMMO_ALLOWED_HOSTS` | Use `start_pilot.ps1`, or add it by hand |
 | The app says "The server could not be reached" | Server off, old tunnel URL, or origin not allowed by CORS | Check `/health`, the URL in Settings and `MAMMO_ALLOWED_ORIGINS` |
 | "The access key is not valid" (401) | Wrong or rotated key | Check Settings |
-| Frequent `server_busy` | Many analyses at once (one at a time on the GPU) | Wait a few seconds; with many doctors, consider another machine |
+| Frequent `server_busy` | Many analyses at once (they run one at a time) | Wait a few seconds; with many doctors, consider another machine |
 | Always `global_only`, no heatmap | Photos less than 1500 px high | Use the original image or closer photos |
 | `start_pilot.ps1` says `Not found: …` | `cloudflared` or the Python venv is not at the default path | Pass `-Cloudflared` or `-Python` |
-| The first analysis takes ~20 s | GPU and OCR warm-up | Normal; later ones are faster |
+| The first analysis takes ~20 s | PyTorch bundle: GPU and OCR warm-up | Normal; later ones are faster. The ONNX bundle has no warm-up |
 
 ## 6. Logs
 
