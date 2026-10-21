@@ -1,5 +1,11 @@
 # ai-mammogram-triage
 
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+> **At a glance:** with high-resolution images, on patients the model never saw, it puts **87 %** of BI-RADS 4-5
+> breasts in `high_priority` or `review` and only **6.5 %** of normal (BI-RADS 1-2) breasts in `high_priority`
+> (AUC 0.89). It runs on a CPU in 1–3 s per image, masks personal data before analysis and never stores images.
+
 An **MCP** server for indicative triage of mammograms (CC/MLO views). It sorts each breast into three BI-RADS groups
 (1-2, 3 and 4-5) and gives it a priority level:
 
@@ -11,6 +17,15 @@ An **MCP** server for indicative triage of mammograms (CC/MLO views). It sorts e
 
 > ⚠️ **Research tool.** It is not a medical device, it is not clinically validated and it never replaces the
 > radiologist's reading.
+
+## Why this project
+
+My mother went through breast cancer. Seeing what she lived through taught me that, with this disease, acting in
+time is what saves lives. Yet many women do not have quick access to medical care: in parts of Latin America there
+is no radiologist nearby, and a mammogram can wait weeks before someone reads it.
+
+This project is my attempt to help them. It lets a physician find out which mammograms look the most worrying, so
+those women reach a radiologist first and get care in time. — Alexander Valderrama
 
 It is part of a three-repository project:
 
@@ -146,3 +161,20 @@ pytest -m integration
 - The filter accepts tomosynthesis slices as if they were 2D mammograms.
 - Low-resolution photos use only the global model, with no heatmap.
 - OCR may miss very faint or very large text.
+
+## Pilot access
+
+The weights are not published, so the server cannot be run without the model bundle. Physicians and researchers who
+want to try it in a research pilot can request an access key with the
+**[pilot access form](https://forms.gle/2msrWXkJW7Cj9rYV8)**.
+
+## License
+
+The code in this repository is licensed under the [Apache License 2.0](LICENSE); see also [NOTICE](NOTICE). It is
+provided "as is", without warranties of any kind. The model weights and the training code are not part of this
+repository and are not covered by this license.
+
+## Author
+
+**Alexander Valderrama** · [LinkedIn](https://www.linkedin.com/in/alexander-valderrama-a9a01910) ·
+[@avalderrama](https://github.com/avalderrama)

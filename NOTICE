@@ -1,0 +1,9 @@
+ai-mammogram-triage
+Copyright 2026 Alexander Valderrama
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Research tool. It is not a medical device, it is not clinically validated and it never replaces the
+radiologist's reading. It is provided "AS IS", without warranties of any kind (see sections 7 and 8 of LICENSE).
+
+The model weights and the training code are not part of this repository and are not covered by this license.
