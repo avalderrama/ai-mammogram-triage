@@ -71,6 +71,8 @@ Add `dev` to the extras (`".[onnx,dev]"`) to run the tests.
 | `MAMMO_TRUST_PROXY_HEADERS` | `false` | Use `CF-Connecting-IP` for the rate limit. Required with a tunnel |
 | `MAMMO_HOST` / `MAMMO_PORT` | `127.0.0.1` / `8765` | Listening address. Do not change the host: use a tunnel |
 | `MAMMO_LOG_LEVEL` | `info` | `debug`, `info`, `warning` or `error` |
+| `MAMMO_ACCESS_TEAM_DOMAIN` | (empty) | Cloudflare Access team domain, e.g. `myteam.cloudflareaccess.com`. With `MAMMO_ACCESS_AUD`, browsers signed in through Access need no key ([ADR 0006](adr/0006-cloudflare-access-identity.md)) |
+| `MAMMO_ACCESS_AUD` | (empty) | AUD tag of the Access application (Zero Trust → Access controls → Applications → *app* → Additional settings). Set both or neither |
 
 `.env` is never committed. The template is `.env.example`.
 

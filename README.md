@@ -140,7 +140,7 @@ are listed in [docs/operations.md](docs/operations.md#remote-pilot-with-https-tu
 | [Security and privacy](docs/security-and-privacy.md) | Defenses, accepted risks and what to do if the key leaks |
 | [Operations](docs/operations.md) | Installation, configuration variables, start modes, pilot and common problems |
 | [Development](docs/development.md) | Tests, conventions and how to make the usual changes |
-| [Decisions (ADR)](docs/adr/) | Python, MCP without REST, unpublished weights, pilot with tunnel and key, ONNX Runtime backend |
+| [Decisions (ADR)](docs/adr/) | Python, MCP without REST, unpublished weights, pilot with tunnel and key, ONNX Runtime backend, Cloudflare Access identity |
 
 ## Tests
 
