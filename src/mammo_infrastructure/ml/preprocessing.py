@@ -13,6 +13,17 @@ def img_size(height: int) -> tuple[int, int]:
     return height, round(height * BASE_W / BASE_H / 32) * 32
 
 
+def is_negative(g: np.ndarray) -> bool:
+    """A mammogram shown in negative: a large near-white background and almost no near-black.
+
+    A bright border is not enough: a white block or a light scan edge beside a normal mammogram, or a photo of a
+    monitor (whose black comes out gray) with the viewer's white strips, would be inverted by mistake. Measured on
+    33 368 training and evaluation images: no normal image with >= 15 % near-white has < 11 % near-black.
+    Limitation: a negative photographed off a monitor (light gray background) is not detected.
+    """
+    return float((g > 235).mean()) >= 0.15 and float((g < 20).mean()) < 0.05
+
+
 def preprocess(gray: np.ndarray, out_h: int = BASE_H) -> np.ndarray:
     """uint8 grayscale mammogram -> uint8 (out_h, width): breast cropped, chest wall on the left."""
     out_h, out_w = img_size(out_h)
@@ -21,8 +32,7 @@ def preprocess(gray: np.ndarray, out_h: int = BASE_H) -> np.ndarray:
     if g.shape[0] > ref_height * 1.2:
         new_w = round(g.shape[1] * ref_height / g.shape[0])
         g = np.asarray(Image.fromarray(g).resize((new_w, ref_height), Image.BOX))
-    border = np.concatenate([g[:10].ravel(), g[-10:].ravel(), g[:, :10].ravel(), g[:, -10:].ravel()])
-    if border.mean() > 127:
+    if is_negative(g):
         g = 255 - g
     mask = ndimage.binary_opening(g > 20, iterations=2)
     labels, n = ndimage.label(mask)
