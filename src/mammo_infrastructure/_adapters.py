@@ -14,7 +14,7 @@ from .bundle import ModelBundle
 from .ml.classifiers import GlobalEnsemble, PatchScanner, render_heatmap, render_heatmap_layers
 from .ml.gate_model import GateModel
 from .ml.imaging import decode, encode_png, to_gray_array
-from .ml.panels import equal_panels, find_panels
+from .ml.panels import equal_boxes, find_panel_boxes
 from .ml.regions import find_regions
 from .ml.text_masking import TextMasker
 
@@ -33,12 +33,12 @@ class _OcrPersonalDataMasker:
 
 
 class _PanelSplitter:
-    def split(self, image: EncodedImage, panel_count: int | None) -> list[EncodedImage]:
+    def split(self, image: EncodedImage, panel_count: int | None, grid: bool = False) -> list[EncodedImage]:
         gray = to_gray_array(decode(image))
-        bounds = equal_panels(gray.shape[1], panel_count) if panel_count else find_panels(gray)
-        if len(bounds) == 1:
+        boxes = equal_boxes(gray.shape, panel_count, grid) if panel_count else find_panel_boxes(gray)
+        if len(boxes) == 1:
             return [encode_png(gray)]
-        return [encode_png(np.ascontiguousarray(gray[:, x0:x1])) for x0, x1 in bounds]
+        return [encode_png(np.ascontiguousarray(gray[y0:y1, x0:x1])) for x0, y0, x1, y1 in boxes]
 
 
 class _MammogramGate:

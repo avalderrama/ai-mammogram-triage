@@ -191,3 +191,12 @@ async def test_schema_errors_from_the_sdk_have_no_code():
     async with Client(server()) as client:
         result = await client.call_tool("mammo_analyze_mammogram", {"image_base64": B64, "panel_count": 9})
     assert result.is_error and result.structured_content is None
+
+
+async def test_analyze_passes_a_grid_arrangement():
+    h = handlers()
+    async with Client(server(h)) as client:
+        await client.call_tool("mammo_analyze_mammogram", {"image_base64": B64, "panel_count": 4,
+                                                           "panel_arrangement": "grid"})
+    command = h.analyze.calls[0]
+    assert command.panel_count == 4 and command.panel_arrangement == "grid"

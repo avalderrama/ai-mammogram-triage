@@ -5,7 +5,7 @@ from dataclasses import asdict
 
 from mammo_application.abstractions import (BiradsClassifier, ImageDecodingError, MammogramGate, PanelSplitter,
                                             PersonalDataMasker, ScoreFuser, ThresholdsProvider, UsageEvent, UsageLog)
-from mammo_application.common import ErrorCode, Result, decoding_error, validate_image
+from mammo_application.common import ErrorCode, Result, arrangement_error, decoding_error, validate_image
 from mammo_domain.assessment import (BiradsProbabilities, BreastSide, NoMammogramFoundError, StudyAssessment,
                                      ViewFinding, ViewType)
 
@@ -57,9 +57,12 @@ class AnalyzeMammogramHandler:
             return Result(error=error)
         if command.panel_count is not None and not 1 <= command.panel_count <= MAX_PANELS:
             return Result.fail(ErrorCode.INVALID_INPUT, f"panel_count must be between 1 and {MAX_PANELS}.")
+        error = arrangement_error(command.panel_count, command.panel_arrangement)
+        if error:
+            return Result(error=error)
         try:
             masked = self._masker.mask(command.image)
-            panels = self._splitter.split(masked.image, command.panel_count)
+            panels = self._splitter.split(masked.image, command.panel_count, command.panel_arrangement == "grid")
         except ImageDecodingError as exc:
             return Result(error=decoding_error(exc))
         sides, views, layout_error = self._layout(command, len(panels))

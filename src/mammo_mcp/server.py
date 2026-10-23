@@ -15,7 +15,7 @@ from mcp.server.mcpserver import Context
 from pydantic import Field
 
 from mammo_application.analyses import (AnalysisResultDto, AnalyzeMammogramCommand, HeatmapFormat, ImageQuery,
-                                        MammogramCheckDto, MaskedImageDto)
+                                        MammogramCheckDto, MaskedImageDto, PanelArrangement)
 from mammo_application.common import AppError, Result
 
 from .formatting import (DISCLAIMER, analysis_markdown, analysis_payload, check_markdown, heatmap_images,
@@ -66,6 +66,9 @@ ImagePath = Annotated[str | None, Field(
     default=None, description="Absolute path of a local image file. Only when the server runs locally (stdio).")]
 PanelCount = Annotated[int | None, Field(
     default=None, ge=1, le=8, description="Number of side-by-side views in the image. Omit to detect separators.")]
+PanelArrangementArg = Annotated[PanelArrangement, Field(
+    default="side_by_side", description="With panel_count: 'side_by_side' (one row) or 'grid' (2 x 2, panel_count "
+    "4), views read left to right and top to bottom. Automatic detection also finds grids with separator lines.")]
 ResponseFormat = Annotated[Literal["markdown", "json"], Field(
     default="markdown", description="'markdown' for a readable summary, 'json' for the raw result.")]
 SummaryLanguage = Annotated[Literal["en", "es"], Field(
@@ -142,6 +145,7 @@ def create_mcp_server(handlers: McpHandlers, options: McpOptions) -> MCPServer:
     @mcp.tool(name="mammo_analyze_mammogram", title="Analyze mammogram", annotations=READ_ONLY)
     async def mammo_analyze_mammogram(
         image_base64: ImageBase64 = None, image_path: ImagePath = None, panel_count: PanelCount = None,
+        panel_arrangement: PanelArrangementArg = "side_by_side",
         sides: Annotated[list[Literal["R", "L", "unknown"]] | None, Field(
             default=None, description="Breast side of each panel, left to right, e.g. ['R','R'].")] = None,
         views: Annotated[list[Literal["CC", "MLO", "unknown"]] | None, Field(
@@ -165,9 +169,11 @@ def create_mcp_server(handlers: McpHandlers, options: McpOptions) -> MCPServer:
         and explain how to fix the input.
         """
         async def work() -> types.CallToolResult:
-            command = AnalyzeMammogramCommand(load(image_base64, image_path), panel_count,
-                                              tuple(sides) if sides else None, tuple(views) if views else None,
-                                              include_heatmap, heatmap_format, _requester(ctx))
+            command = AnalyzeMammogramCommand(
+                load(image_base64, image_path), panel_count=panel_count,
+                sides=tuple(sides) if sides else None, views=tuple(views) if views else None,
+                include_heatmap=include_heatmap, heatmap_format=heatmap_format, requester=_requester(ctx),
+                panel_arrangement=panel_arrangement)
             result = await run(analyze_handler.handle, command)
             if not result.is_success:
                 return _app_error(result.error)
@@ -186,12 +192,14 @@ def create_mcp_server(handlers: McpHandlers, options: McpOptions) -> MCPServer:
     @mcp.tool(name="mammo_check_is_mammogram", title="Check if image is a mammogram", annotations=READ_ONLY)
     async def mammo_check_is_mammogram(image_base64: ImageBase64 = None, image_path: ImagePath = None,
                                        panel_count: PanelCount = None,
+                                       panel_arrangement: PanelArrangementArg = "side_by_side",
                                        response_format: ResponseFormat = "markdown",
                                        language: SummaryLanguage = "en") -> types.CallToolResult:
         """Tell, per panel, whether the image is a usable 2D mammogram (CC/MLO) and report photo quality
         issues. Use it before asking a doctor to retake a photo. Does not classify BI-RADS."""
         async def work() -> types.CallToolResult:
-            result = await run(check_handler.handle, ImageQuery(load(image_base64, image_path), panel_count))
+            result = await run(check_handler.handle,
+                               ImageQuery(load(image_base64, image_path), panel_count, panel_arrangement))
             if not result.is_success:
                 return _app_error(result.error)
             payload = asdict(result.value)

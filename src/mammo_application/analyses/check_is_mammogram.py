@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from mammo_application.abstractions import ImageDecodingError, MammogramGate, PanelSplitter, ThresholdsProvider
-from mammo_application.common import Result, decoding_error, validate_image
+from mammo_application.common import Result, arrangement_error, decoding_error, validate_image
 
 from .dtos import ImageQuery, MammogramCheckDto, PanelCheckDto
 
@@ -16,11 +16,12 @@ class CheckIsMammogramHandler:
         self._max_image_bytes = max_image_bytes
 
     def handle(self, query: ImageQuery) -> Result[MammogramCheckDto]:
-        error = validate_image(query.image, self._max_image_bytes)
+        error = (validate_image(query.image, self._max_image_bytes)
+                 or arrangement_error(query.panel_count, query.panel_arrangement))
         if error:
             return Result(error=error)
         try:
-            panels = self._splitter.split(query.image, query.panel_count)
+            panels = self._splitter.split(query.image, query.panel_count, query.panel_arrangement == "grid")
         except ImageDecodingError as exc:
             return Result(error=decoding_error(exc))
         checks = []
