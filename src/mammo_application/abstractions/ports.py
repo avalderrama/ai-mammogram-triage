@@ -109,11 +109,18 @@ class DailyUsage:
     views: int = 0
     detailed_views: int = 0
     people: int = 0
+    # A second gate observing the one in use (shadow mode): views both judged, and those where they disagree.
+    gate_compared: int = 0
+    gate_only_current: int = 0  # the gate in use accepts, the shadow rejects
+    gate_only_shadow: int = 0   # the shadow accepts, the gate in use rejects
 
 
 class UsageLog(Protocol):
     def record(self, event: UsageEvent) -> None:
         """Counts one analysis. Must never raise: usage counting cannot break an analysis."""
+
+    def record_gate_comparison(self, current: bool, shadow: bool) -> None:
+        """Counts one view judged by the gate in use and by the shadow gate. Must never raise."""
 
     def daily(self, days: int) -> list[DailyUsage]:
         """The last `days` days with activity, most recent first."""

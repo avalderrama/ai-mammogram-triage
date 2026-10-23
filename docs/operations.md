@@ -75,6 +75,7 @@ Add `dev` to the extras (`".[onnx,dev]"`) to run the tests.
 | `MAMMO_ACCESS_AUD` | (empty) | AUD tag of the Access application (Zero Trust → Access controls → Applications → *app* → Additional settings). Set both or neither |
 | `MAMMO_USAGE_FILE` | (empty) | JSON file for the anonymous usage counters (writable by the server). Empty: nothing is counted |
 | `MAMMO_USAGE_TIMEZONE` | `America/Bogota` | Time zone that decides where a usage day ends |
+| `MAMMO_SHADOW_GATE_DIR` | (empty) | Another ONNX bundle whose gate judges every view **without deciding** (shadow mode); `/usage` counts the views where it disagrees with the gate in use. Only its gate is loaded |
 | `MAMMO_ADMIN_EMAILS` | (empty) | Cloudflare Access e-mails, comma-separated, allowed to see the usage report at `/usage` |
 
 `.env` is never committed. The template is `.env.example`.

@@ -218,16 +218,18 @@ _USAGE_TEXT = {
     "en": {"title": "Pilot usage",
            "note": "Analyses per day. Counts only: no images, results or identities are kept.",
            "columns": ("Day", "Analyses", "People", "High priority", "Review", "No suspicious findings",
-                       "Not a mammogram", "Errors", "Views", "Views with heatmap"),
+                       "Not a mammogram", "Errors", "Views", "Views with heatmap", "Shadow gate: views",
+                       "Only the current gate accepts", "Only the shadow gate accepts"),
            "total": "Total", "empty": "No analyses yet."},
     "es": {"title": "Uso del piloto",
            "note": "Análisis por día. Solo conteos: no se guardan imágenes, resultados ni identidades.",
            "columns": ("Día", "Análisis", "Personas", "Alta prioridad", "Revisar", "Sin hallazgos",
-                       "No es mamografía", "Errores", "Vistas", "Vistas con mapa de calor"),
+                       "No es mamografía", "Errores", "Vistas", "Vistas con mapa de calor", "Filtro sombra: vistas",
+                       "Solo el filtro actual acepta", "Solo el filtro sombra acepta"),
            "total": "Total", "empty": "Todavía no hay análisis."},
 }
 _USAGE_FIELDS = ("analyses", "people", "high_priority", "review", "no_suspicious_findings", "not_a_mammogram",
-                 "errors", "views", "detailed_views")
+                 "errors", "views", "detailed_views", "gate_compared", "gate_only_current", "gate_only_shadow")
 
 
 def _usage_html(days: list[DailyUsage], language: str) -> str:

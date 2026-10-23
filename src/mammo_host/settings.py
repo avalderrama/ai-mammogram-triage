@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     # Anonymous usage counters (analyses per day, no images or identities). Unset: nothing is counted.
     usage_file: Path | None = Field(default=None, description="JSON file for the usage counters (writable).")
     usage_timezone: str = Field(default="America/Bogota", description="Time zone that decides where a day ends.")
+    # A second gate, from another ONNX bundle, that judges every view without deciding (compared in /usage).
+    shadow_gate_dir: Path | None = Field(default=None, description="Bundle whose gate runs in shadow mode.")
     admin_emails: Annotated[tuple[str, ...], NoDecode] = Field(
         default=(), description="Cloudflare Access e-mails allowed to see /usage (comma-separated).")
 

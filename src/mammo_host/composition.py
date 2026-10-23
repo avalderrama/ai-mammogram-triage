@@ -26,7 +26,8 @@ def build_handlers(ports: Ports, settings: Settings, usage: UsageLog | None = No
 
 def build_mcp(settings: Settings, allow_local_paths: bool, ports: Ports | None = None,
               usage: UsageLog | None = None):
-    ports = ports or create_ports(settings.models_dir, settings.device, settings.verify_bundle)
+    ports = ports or create_ports(settings.models_dir, settings.device, settings.verify_bundle,
+                                  settings.shadow_gate_dir, usage.record_gate_comparison if usage else None)
     return create_mcp_server(build_handlers(ports, settings, usage),
                              McpOptions(allow_local_paths, settings.max_image_bytes, VERSION))
 

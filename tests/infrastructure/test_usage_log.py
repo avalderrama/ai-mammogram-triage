@@ -88,3 +88,11 @@ def test_service_tokens_are_not_counted_as_people(tmp_path):
     log = usage_log(tmp_path / "usage.json", Clock())
     log.record(UsageEvent("review", requester="unknown"))
     assert log.daily(30)[0].people == 0
+
+
+def test_gate_comparisons_are_counted_per_day(tmp_path):
+    log = usage_log(tmp_path / "usage.json", Clock())
+    for current, shadow in ((True, True), (True, False), (False, True), (False, True)):
+        log.record_gate_comparison(current, shadow)
+    [day] = log.daily(30)
+    assert (day.gate_compared, day.gate_only_current, day.gate_only_shadow) == (4, 1, 2)
