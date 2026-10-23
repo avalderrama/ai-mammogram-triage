@@ -19,6 +19,17 @@ def validate_image(image: EncodedImage, max_bytes: int) -> AppError | None:
     return None
 
 
+GRID_PANELS = 4
+
+
+def arrangement_error(panel_count: int | None, arrangement: str) -> AppError | None:
+    """A grid is 2 x 2: it needs panel_count 4 (automatic detection already finds grids with separator lines)."""
+    if arrangement == "grid" and panel_count != GRID_PANELS:
+        return AppError(ErrorCode.INVALID_INPUT,
+                        f"panel_arrangement 'grid' needs panel_count {GRID_PANELS} (2 rows of 2 views).")
+    return None
+
+
 def decoding_error(exc: Exception) -> AppError:
     """Error for an image the adapters could not decode; an over-sized image gets actionable advice."""
     if isinstance(exc, ImageTooManyPixelsError):

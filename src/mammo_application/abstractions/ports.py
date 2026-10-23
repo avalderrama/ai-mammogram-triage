@@ -31,8 +31,9 @@ class ImageTooManyPixelsError(ImageDecodingError):
 
 
 class PanelSplitter(Protocol):
-    def split(self, image: EncodedImage, panel_count: int | None) -> list[EncodedImage]:
-        """Split side-by-side views. panel_count=None detects separators automatically."""
+    def split(self, image: EncodedImage, panel_count: int | None, grid: bool = False) -> list[EncodedImage]:
+        """Split the views of an image, left to right and top to bottom. panel_count=None detects separators
+        automatically; otherwise that many equal views side by side, or, with grid, in two rows."""
 
 
 @dataclass(frozen=True)

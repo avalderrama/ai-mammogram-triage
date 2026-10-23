@@ -22,12 +22,12 @@ class FakeMasker:
 
 class FakeSplitter:
     def __init__(self, n=2, fail=False):
-        self.n, self.fail, self.received = n, fail, None
+        self.n, self.fail, self.received, self.grid = n, fail, None, None
 
-    def split(self, image, panel_count):
+    def split(self, image, panel_count, grid=False):
         if self.fail:
             raise ImageDecodingError()
-        self.received = image
+        self.received, self.grid = image, grid
         return [EncodedImage(f"panel{i}".encode(), "image/png") for i in range(panel_count or self.n)]
 
 
@@ -164,7 +164,7 @@ def test_too_many_pixels_is_reported_as_too_large():
     from mammo_application.abstractions import ImageTooManyPixelsError
 
     class HugeSplitter(FakeSplitter):
-        def split(self, image, panel_count):
+        def split(self, image, panel_count, grid=False):
             raise ImageTooManyPixelsError()
 
     handler = AnalyzeMammogramHandler(FakeMasker(), HugeSplitter(), FakeGate(), FakeClassifier(), FakeFuser(),
@@ -221,3 +221,15 @@ def test_an_unexpected_failure_is_counted_as_an_error_and_still_raised():
     with pytest.raises(RuntimeError):
         analyze.handle(AnalyzeMammogramCommand(PNG, requester="doctor@example.org"))
     assert [e.outcome for e in usage.events] == ["error"]
+
+
+def test_a_2x2_grid_is_split_as_a_grid():
+    splitter = FakeSplitter()
+    result = handler(splitter=splitter, gate=FakeGate((True,) * 4)).handle(
+        AnalyzeMammogramCommand(PNG, panel_count=4, panel_arrangement="grid"))
+    assert result.is_success and splitter.grid is True
+
+
+def test_a_grid_needs_four_views():
+    result = handler().handle(AnalyzeMammogramCommand(PNG, panel_count=2, panel_arrangement="grid"))
+    assert result.error.code == ErrorCode.INVALID_INPUT and "grid" in result.error.message

@@ -6,6 +6,9 @@ from typing import Literal
 
 from mammo_application.abstractions import EncodedImage
 
+# How the views are laid out when panel_count is given: in one row, or in a 2 x 2 grid (panel_count must be 4).
+PanelArrangement = Literal["side_by_side", "grid"]
+
 # "combined": the red areas drawn over the breast (one image per view). "layers": the breast and the red areas as two
 # images of the same size, so a client can show or hide the red areas.
 HeatmapFormat = Literal["combined", "layers"]
@@ -21,12 +24,14 @@ class AnalyzeMammogramCommand:
     heatmap_format: HeatmapFormat = "combined"
     # Verified identity of the caller (Cloudflare Access e-mail), only to count distinct people; never stored.
     requester: str | None = None
+    panel_arrangement: PanelArrangement = "side_by_side"
 
 
 @dataclass(frozen=True)
 class ImageQuery:
     image: EncodedImage
     panel_count: int | None = None
+    panel_arrangement: PanelArrangement = "side_by_side"
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,8 @@ non-destructive and idempotent, and they do not call external services (MCP *ann
 |---|---|---|---|
 | `image_base64` | string | all | The image in base64. The `data:image/…;base64,` prefix is accepted |
 | `image_path` | string | all | Local path. Only with the **stdio** transport; rejected over HTTP |
-| `panel_count` | integer 1–8 | analyze, check | Number of side-by-side views. If omitted, separators are detected |
+| `panel_count` | integer 1–8 | analyze, check | Number of views. If omitted, separators are detected, also in a grid (white lines between rows and columns) |
+| `panel_arrangement` | `side_by_side` or `grid` | analyze, check | With `panel_count`: views in one row, or in a 2 × 2 grid (`panel_count` 4). Views are numbered left to right and top to bottom |
 | `response_format` | `markdown` or `json` | analyze, check | Format of the text in `content[0]`. Default `markdown` |
 | `language` | `en` or `es` | all | Language of the human-readable text summary. Default `en`. `structuredContent` is always in English |
 
