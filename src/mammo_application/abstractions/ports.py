@@ -83,3 +83,36 @@ class ThresholdsProvider(Protocol):
     def thresholds(self) -> dict[ScoringMode, TriageThresholds]: ...
 
     def model_version(self) -> str: ...
+
+
+@dataclass(frozen=True)
+class UsageEvent:
+    """One analysis, as the usage counter sees it: no image, no result details, no identity it keeps."""
+    outcome: str  # the overall level, "not_a_mammogram" or "error"
+    views: int = 0
+    detailed_views: int = 0  # views the high-resolution model analyzed (heatmap available)
+    # The verified identity of whoever asked, to count distinct people per day. The usage log keeps only a keyed hash
+    # of the day and the identity, for the current day, and never stores the identity itself.
+    requester: str | None = None
+
+
+@dataclass(frozen=True)
+class DailyUsage:
+    day: str  # ISO date in the usage log's time zone
+    analyses: int = 0
+    high_priority: int = 0
+    review: int = 0
+    no_suspicious_findings: int = 0
+    not_a_mammogram: int = 0
+    errors: int = 0
+    views: int = 0
+    detailed_views: int = 0
+    people: int = 0
+
+
+class UsageLog(Protocol):
+    def record(self, event: UsageEvent) -> None:
+        """Counts one analysis. Must never raise: usage counting cannot break an analysis."""
+
+    def daily(self, days: int) -> list[DailyUsage]:
+        """The last `days` days with activity, most recent first."""

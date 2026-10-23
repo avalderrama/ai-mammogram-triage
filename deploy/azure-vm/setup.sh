@@ -91,7 +91,19 @@ if [ -f "$HERE/access.env" ]; then
   sed -i '/^MAMMO_ACCESS_\(TEAM_DOMAIN\|AUD\)=/d' "$ENV_FILE"
   echo "$ACCESS" >> "$ENV_FILE"
   unset ACCESS
+  # Optional: the Access e-mails that may see the usage report (/usage), comma-separated. The line in access.env
+  # always replaces the previous one, so removing it removes every administrator.
+  sed -i '/^MAMMO_ADMIN_EMAILS=/d' "$ENV_FILE"
+  ADMINS=$(tr -d ' \r' < "$HERE/access.env" | grep -E '^MAMMO_ADMIN_EMAILS=[A-Za-z0-9._%+@,-]+$' | tail -1 || true)
+  if [ -n "$ADMINS" ]; then
+    echo "$ADMINS" >> "$ENV_FILE"
+  elif grep -q '^MAMMO_ADMIN_EMAILS=' "$HERE/access.env"; then
+    echo "access.env: MAMMO_ADMIN_EMAILS is not a comma-separated list of e-mails; nobody can see /usage"
+  fi
+  unset ADMINS
 fi
+# Anonymous usage counters, in the service's state directory (mammo-triage.service, StateDirectory).
+grep -q '^MAMMO_USAGE_FILE=' "$ENV_FILE" || echo "MAMMO_USAGE_FILE=/var/lib/mammo-triage/usage.json" >> "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
 echo "== 6. Service"

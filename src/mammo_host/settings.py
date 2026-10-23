@@ -30,13 +30,23 @@ class Settings(BaseSettings):
     access_team_domain: str | None = Field(
         default=None, description="Access team domain, e.g. myteam.cloudflareaccess.com. Set together with access_aud.")
     access_aud: str | None = Field(default=None, description="AUD tag of the Access application.")
+    # Anonymous usage counters (analyses per day, no images or identities). Unset: nothing is counted.
+    usage_file: Path | None = Field(default=None, description="JSON file for the usage counters (writable).")
+    usage_timezone: str = Field(default="America/Bogota", description="Time zone that decides where a day ends.")
+    admin_emails: Annotated[tuple[str, ...], NoDecode] = Field(
+        default=(), description="Cloudflare Access e-mails allowed to see /usage (comma-separated).")
 
-    @field_validator("allowed_origins", "allowed_hosts", mode="before")
+    @field_validator("allowed_origins", "allowed_hosts", "admin_emails", mode="before")
     @classmethod
     def _split_csv(cls, value: object) -> object:
         if isinstance(value, str):
             return tuple(v.strip() for v in value.split(",") if v.strip())
         return value
+
+    @field_validator("admin_emails", mode="after")
+    @classmethod
+    def _lowercase(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(v.lower() for v in value)
 
     @field_validator("access_team_domain", mode="before")
     @classmethod

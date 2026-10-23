@@ -102,7 +102,13 @@ next to `config.yml` in the private tunnel folder and deploy again:
 ```bash
 MAMMO_ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com
 MAMMO_ACCESS_AUD=<AUD tag of the application: Access controls → Applications → app → Additional settings>
+# Optional: who may see the anonymous usage report at https://<domain>/usage (comma-separated)
+MAMMO_ADMIN_EMAILS=<your Access e-mail>
 ```
+
+`setup.sh` also sets `MAMMO_USAGE_FILE=/var/lib/mammo-triage/usage.json`, in the only folder the service may write
+(`StateDirectory` in `mammo-triage.service`). The counters are numbers per day; nothing personal is kept
+([security-and-privacy.md](../../docs/security-and-privacy.md)).
 
 The API key stays for technical clients: read it on the VM with `sudo grep MAMMO_API_KEY /etc/mammo-triage/env`.
 

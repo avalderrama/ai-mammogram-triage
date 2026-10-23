@@ -73,6 +73,9 @@ Add `dev` to the extras (`".[onnx,dev]"`) to run the tests.
 | `MAMMO_LOG_LEVEL` | `info` | `debug`, `info`, `warning` or `error` |
 | `MAMMO_ACCESS_TEAM_DOMAIN` | (empty) | Cloudflare Access team domain, e.g. `myteam.cloudflareaccess.com`. With `MAMMO_ACCESS_AUD`, browsers signed in through Access need no key ([ADR 0006](adr/0006-cloudflare-access-identity.md)) |
 | `MAMMO_ACCESS_AUD` | (empty) | AUD tag of the Access application (Zero Trust → Access controls → Applications → *app* → Additional settings). Set both or neither |
+| `MAMMO_USAGE_FILE` | (empty) | JSON file for the anonymous usage counters (writable by the server). Empty: nothing is counted |
+| `MAMMO_USAGE_TIMEZONE` | `America/Bogota` | Time zone that decides where a usage day ends |
+| `MAMMO_ADMIN_EMAILS` | (empty) | Cloudflare Access e-mails, comma-separated, allowed to see the usage report at `/usage` |
 
 `.env` is never committed. The template is `.env.example`.
 
@@ -168,4 +171,8 @@ The app messages below are the English texts; the Spanish option shows the equiv
 ## 6. Logs
 
 - The server writes to standard error. It does not log images, OCR text or tool arguments.
+- Usage: with `MAMMO_USAGE_FILE` set, `/usage` shows analyses per day (by result, views, views with heatmap and
+  distinct people) to the e-mails in `MAMMO_ADMIN_EMAILS`, signed in through Cloudflare Access; anyone else gets 403.
+  `?days=90` shows up to the last 90 days with activity and `?lang=es` switches the language. See [security-and-privacy.md](security-and-privacy.md)
+  for what is and is not kept.
 - `start_pilot.ps1` saves the tunnel and PWA logs in `-LogDir` (by default `%USERPROFILE%\mammo-data\logs`).
