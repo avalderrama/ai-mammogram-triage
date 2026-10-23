@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from mammo_application.abstractions import (BiradsClassifier, ImageDecodingError, MammogramGate, PanelSplitter,
-                                            PersonalDataMasker, ScoreFuser, ThresholdsProvider)
+                                            PersonalDataMasker, ScoreFuser, ThresholdsProvider, UsageEvent, UsageLog)
 from mammo_application.common import ErrorCode, Result, decoding_error, validate_image
 from mammo_domain.assessment import (BiradsProbabilities, BreastSide, NoMammogramFoundError, StudyAssessment,
                                      ViewFinding, ViewType)
@@ -14,6 +14,15 @@ from .dtos import AnalysisResultDto, AnalyzeMammogramCommand, BreastResultDto, R
 MAX_PANELS = 8
 
 
+def _usage_event(result: Result[AnalysisResultDto], requester: str | None) -> UsageEvent:
+    if not result.is_success:
+        outcome = "not_a_mammogram" if result.error.code == ErrorCode.NOT_A_MAMMOGRAM else "error"
+        return UsageEvent(outcome, requester=requester)
+    views = [v for b in result.value.breasts for v in b.views]
+    return UsageEvent(result.value.overall_level, views=len(views),
+                      detailed_views=sum(v.heatmap_unavailable_reason is None for v in views), requester=requester)
+
+
 def _probabilities_dict(p: BiradsProbabilities) -> dict[str, float]:
     return {"birads_1_2": p.routine.value, "birads_3": p.short_follow_up.value, "birads_4_5": p.biopsy.value}
 
@@ -21,7 +30,7 @@ def _probabilities_dict(p: BiradsProbabilities) -> dict[str, float]:
 class AnalyzeMammogramHandler:
     def __init__(self, masker: PersonalDataMasker, splitter: PanelSplitter, gate: MammogramGate,
                  classifier: BiradsClassifier, fuser: ScoreFuser, thresholds: ThresholdsProvider,
-                 max_image_bytes: int) -> None:
+                 max_image_bytes: int, usage: UsageLog | None = None) -> None:
         self._masker = masker
         self._splitter = splitter
         self._gate = gate
@@ -29,8 +38,20 @@ class AnalyzeMammogramHandler:
         self._fuser = fuser
         self._thresholds = thresholds
         self._max_image_bytes = max_image_bytes
+        self._usage = usage
 
     def handle(self, command: AnalyzeMammogramCommand) -> Result[AnalysisResultDto]:
+        try:
+            result = self._analyze(command)
+        except Exception:
+            if self._usage is not None:
+                self._usage.record(UsageEvent("error", requester=command.requester))
+            raise
+        if self._usage is not None:
+            self._usage.record(_usage_event(result, command.requester))
+        return result
+
+    def _analyze(self, command: AnalyzeMammogramCommand) -> Result[AnalysisResultDto]:
         error = validate_image(command.image, self._max_image_bytes)
         if error:
             return Result(error=error)

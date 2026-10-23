@@ -1,4 +1,6 @@
 """Use case tests with fake ports (no ML, no IO)."""
+import pytest
+
 from mammo_application.abstractions import (EncodedImage, GateVerdict, ImageDecodingError, MaskedImage,
                                             PanelPrediction, SuspiciousRegion)
 from mammo_application.analyses import AnalyzeMammogramCommand, AnalyzeMammogramHandler
@@ -177,3 +179,45 @@ def test_suspicious_regions_reach_the_view_result():
     view = handler.handle(AnalyzeMammogramCommand(PNG, sides=("R",), views=("MLO",), panel_count=1)).value.breasts[0].views[0]
     assert view.regions == [{"x": 0.6, "y": 0.1, "width": 0.15, "height": 0.12, "score": 0.9,
                              "depth": "anterior", "vertical": "upper"}]
+
+
+class RecordingUsage:
+    def __init__(self):
+        self.events = []
+
+    def record(self, event):
+        self.events.append(event)
+
+    def daily(self, days):
+        return []
+
+
+def test_each_analysis_is_counted_with_its_outcome_views_and_requester():
+    usage = RecordingUsage()
+    analyze = AnalyzeMammogramHandler(FakeMasker(), FakeSplitter(), FakeGate(), FakeClassifier(), FakeFuser(),
+                                      FakeThresholds(), 1000, usage)
+    result = analyze.handle(AnalyzeMammogramCommand(PNG, requester="doctor@example.org"))
+    [event] = usage.events
+    assert event.outcome == result.value.overall_level and event.requester == "doctor@example.org"
+    assert event.views == 2 and event.detailed_views == 2
+
+
+def test_rejections_and_errors_are_counted_too():
+    usage = RecordingUsage()
+    analyze = AnalyzeMammogramHandler(FakeMasker(), FakeSplitter(), FakeGate((False, False)), FakeClassifier(),
+                                      FakeFuser(), FakeThresholds(), 1000, usage)
+    analyze.handle(AnalyzeMammogramCommand(PNG))
+    analyze.handle(AnalyzeMammogramCommand(PNG, panel_count=99))
+    assert [e.outcome for e in usage.events] == ["not_a_mammogram", "error"]
+
+
+def test_an_unexpected_failure_is_counted_as_an_error_and_still_raised():
+    class Broken(FakeMasker):
+        def mask(self, image):
+            raise RuntimeError("boom")
+    usage = RecordingUsage()
+    analyze = AnalyzeMammogramHandler(Broken(), FakeSplitter(), FakeGate(), FakeClassifier(), FakeFuser(),
+                                      FakeThresholds(), 1000, usage)
+    with pytest.raises(RuntimeError):
+        analyze.handle(AnalyzeMammogramCommand(PNG, requester="doctor@example.org"))
+    assert [e.outcome for e in usage.events] == ["error"]

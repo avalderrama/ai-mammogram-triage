@@ -74,19 +74,24 @@ class CloudflareAccessVerifier:
         self._key_for = key_resolver or TeamKeys(f"{self._issuer}/cdn-cgi/access/certs")
 
     def verify(self, token: str) -> bool:
+        return self.identify(token) is not None
+
+    def identify(self, token: str) -> str | None:
+        """The identity in a valid token (the e-mail, or the subject for service tokens), or None if invalid."""
         if not token or len(token) > _MAX_TOKEN_CHARS:
-            return False
+            return None
         try:
-            jwt.decode(token, self._key_for(token), algorithms=_ALGORITHMS, audience=self._audience,
-                       issuer=self._issuer, leeway=_CLOCK_SKEW_SECONDS,
-                       options={"require": ["exp", "iat", "iss", "aud"]})
+            claims = jwt.decode(token, self._key_for(token), algorithms=_ALGORITHMS, audience=self._audience,
+                                issuer=self._issuer, leeway=_CLOCK_SKEW_SECONDS,
+                                options={"require": ["exp", "iat", "iss", "aud"]})
         except jwt.PyJWKClientConnectionError as error:
             log.warning("Could not fetch the Cloudflare Access signing keys (%s).", type(error).__name__)
-            return False
+            return None
         except jwt.PyJWTError as error:
             log.info("Rejected a Cloudflare Access token (%s).", type(error).__name__)
-            return False
+            return None
         except Exception as error:  # e.g. a key set that is not JSON: deny instead of failing with a 500
             log.warning("Could not verify a Cloudflare Access token (%s).", type(error).__name__)
-            return False
-        return True
+            return None
+        identity = claims.get("email") or claims.get("sub")
+        return identity.strip().lower() if isinstance(identity, str) and identity.strip() else "unknown"

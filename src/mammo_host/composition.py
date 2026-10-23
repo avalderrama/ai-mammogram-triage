@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from mammo_api import CloudflareAccessVerifier, HttpOptions, create_http_app
+from mammo_application.abstractions import UsageLog
 from mammo_application.analyses import (AnalyzeMammogramHandler, CheckIsMammogramHandler,
                                         MaskPersonalDataHandler)
-from mammo_infrastructure import Ports, create_ports
+from mammo_application.usage import UsageReportHandler
+from mammo_infrastructure import JsonUsageLog, NoUsageLog, Ports, create_ports
 from mammo_mcp import McpHandlers, McpOptions, create_mcp_server
 
 from .settings import Settings
@@ -12,19 +14,20 @@ from .settings import Settings
 VERSION = "0.1.0"
 
 
-def build_handlers(ports: Ports, settings: Settings) -> McpHandlers:
+def build_handlers(ports: Ports, settings: Settings, usage: UsageLog | None = None) -> McpHandlers:
     limit = settings.max_image_bytes
     return McpHandlers(
         analyze=AnalyzeMammogramHandler(ports.masker, ports.splitter, ports.gate, ports.classifier, ports.fuser,
-                                        ports.thresholds, limit),
+                                        ports.thresholds, limit, usage),
         check=CheckIsMammogramHandler(ports.splitter, ports.gate, ports.thresholds, limit),
         mask=MaskPersonalDataHandler(ports.masker, limit),
     )
 
 
-def build_mcp(settings: Settings, allow_local_paths: bool, ports: Ports | None = None):
+def build_mcp(settings: Settings, allow_local_paths: bool, ports: Ports | None = None,
+              usage: UsageLog | None = None):
     ports = ports or create_ports(settings.models_dir, settings.device, settings.verify_bundle)
-    return create_mcp_server(build_handlers(ports, settings),
+    return create_mcp_server(build_handlers(ports, settings, usage),
                              McpOptions(allow_local_paths, settings.max_image_bytes, VERSION))
 
 
@@ -39,8 +42,12 @@ def build_http_app(settings: Settings, ports: Ports | None = None):
         raise SystemExit("Set MAMMO_ACCESS_TEAM_DOMAIN and MAMMO_ACCESS_AUD together (Cloudflare Access), or neither.")
     access = (CloudflareAccessVerifier(settings.access_team_domain, settings.access_aud)
               if settings.access_configured else None)
-    mcp = build_mcp(settings, allow_local_paths=False, ports=ports)
+    # The API key keys the daily person hashes: without it they cannot be matched to an e-mail.
+    usage = (JsonUsageLog(settings.usage_file, settings.api_key.get_secret_value().encode(), settings.usage_timezone)
+             if settings.usage_file else NoUsageLog())
+    mcp = build_mcp(settings, allow_local_paths=False, ports=ports, usage=usage)
     return create_http_app(mcp, HttpOptions(
         api_key=settings.api_key.get_secret_value(), max_body_bytes=settings.max_body_bytes,
         rate_limit_per_minute=settings.rate_limit_per_minute, allowed_origins=settings.allowed_origins,
-        allowed_hosts=settings.allowed_hosts, trust_proxy_headers=settings.trust_proxy_headers, access=access))
+        allowed_hosts=settings.allowed_hosts, trust_proxy_headers=settings.trust_proxy_headers, access=access,
+        admin_emails=settings.admin_emails, usage_report=UsageReportHandler(usage).handle))

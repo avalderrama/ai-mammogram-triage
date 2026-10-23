@@ -30,6 +30,12 @@ def test_csv_lists_are_parsed():
     assert s.allowed_hosts == ("a.example", "127.0.0.1:*") and s.exposed_beyond_loopback
 
 
+def test_admin_emails_are_a_lowercase_list_and_usage_is_off_by_default():
+    s = settings(admin_emails="Admin@Example.org, second@example.org")
+    assert s.admin_emails == ("admin@example.org", "second@example.org")
+    assert s.usage_file is None and s.usage_timezone == "America/Bogota"
+
+
 @pytest.mark.parametrize("hosts", [("[::1]",), ("[::1]:*",), ("::1",), ("localhost:*", "127.0.0.1")])
 def test_loopback_hosts_are_not_public(hosts):
     assert not settings(allowed_hosts=hosts).exposed_beyond_loopback

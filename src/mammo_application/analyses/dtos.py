@@ -19,6 +19,8 @@ class AnalyzeMammogramCommand:
     views: tuple[str, ...] | None = None     # per panel: "CC", "MLO" or "unknown"
     include_heatmap: bool = True
     heatmap_format: HeatmapFormat = "combined"
+    # Verified identity of the caller (Cloudflare Access e-mail), only to count distinct people; never stored.
+    requester: str | None = None
 
 
 @dataclass(frozen=True)

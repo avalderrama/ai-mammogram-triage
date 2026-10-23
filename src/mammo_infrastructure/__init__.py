@@ -2,5 +2,6 @@
 implementing the application ports."""
 from .bundle import BundleError
 from .registration import Ports, create_ports
+from .usage_log import JsonUsageLog, NoUsageLog
 
-__all__ = ["BundleError", "Ports", "create_ports"]
+__all__ = ["BundleError", "JsonUsageLog", "NoUsageLog", "Ports", "create_ports"]

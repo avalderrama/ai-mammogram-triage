@@ -28,6 +28,9 @@ RestrictNamespaces=true
 LockPersonality=true
 CapabilityBoundingSet=
 ReadOnlyPaths=/opt/mammo-triage
+# The only writable place: /var/lib/mammo-triage, for the anonymous usage counters (MAMMO_USAGE_FILE).
+StateDirectory=mammo-triage
+StateDirectoryMode=0700
 
 [Install]
 WantedBy=multi-user.target

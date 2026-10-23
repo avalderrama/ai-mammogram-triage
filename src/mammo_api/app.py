@@ -1,7 +1,7 @@
 """HTTP exposure of the MCP server: streamable HTTP plus authentication, body limit, rate limit and CORS.
 
 Middlewares are pure ASGI so they never buffer responses and pass lifespan events through untouched.
-Order (outer to inner): CORS -> rate limit -> authentication -> body limit -> MCP app.
+Order (outer to inner): CORS -> rate limit -> authentication -> body limit -> MCP app (plus /health and /usage).
 """
 from __future__ import annotations
 
@@ -18,8 +18,10 @@ from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
+
+from mammo_application.abstractions import DailyUsage
 
 from .access import ACCESS_JWT_HEADER
 
@@ -31,6 +33,7 @@ ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 
 MCP_PATH = "/mcp"
 HEALTH_PATH = "/health"
+USAGE_PATH = "/usage"
 
 
 def _is_health_probe(scope: Scope) -> bool:
@@ -47,6 +50,9 @@ class HttpOptions:
     allowed_hosts: tuple[str, ...]
     trust_proxy_headers: bool = False
     access: AccessTokenVerifier | None = None
+    # The usage report (/usage) is shown only to these Cloudflare Access e-mails; empty = nobody.
+    admin_emails: tuple[str, ...] = ()
+    usage_report: Callable[[int], list[DailyUsage]] | None = None
 
 
 async def _send_json(send: Send, status: int, body: dict, headers: dict[str, str] | None = None) -> None:
@@ -65,14 +71,16 @@ def _header(scope: Scope, name: bytes) -> str | None:
 
 
 class AccessTokenVerifier(Protocol):
-    def verify(self, token: str) -> bool:
-        """Whether the identity token issued by the gateway in front of the server is valid. May block on I/O."""
+    def identify(self, token: str) -> str | None:
+        """The identity in the token issued by the gateway in front of the server, or None when the token is not
+        valid. May block on I/O."""
 
 
 class AuthenticationMiddleware:
     """Requires, on every route except /health, either the API key (`Authorization: Bearer <key>` or
     `X-API-Key: <key>`) or, when a verifier is configured, a valid Cloudflare Access token. The key serves technical
-    clients; browsers that went through Access are already identified by it and need no key."""
+    clients; browsers that went through Access are already identified by it and need no key. The Access identity
+    (e-mail) is left in the request state as `identity` (None with the key); it is never logged."""
 
     def __init__(self, app: ASGIApp, api_key: str, access: AccessTokenVerifier | None = None) -> None:
         if len(api_key) < 24:
@@ -86,23 +94,29 @@ class AuthenticationMiddleware:
         key = _header(scope, b"x-api-key")
         return key.strip().encode() if key else None
 
-    async def _authenticated(self, scope: Scope) -> bool:
+    async def _authenticate(self, scope: Scope) -> tuple[bool, str | None]:
+        """Whether the request may go on, and the Access identity behind it (None with the API key)."""
         presented = self._presented_key(scope)
         if presented is not None and hmac.compare_digest(presented, self._key):
-            return True
+            return True, None
         token = _header(scope, ACCESS_JWT_HEADER) if self._access else None
+        if not token:
+            return False, None
         # Signature checks are CPU work and a key-set refresh is network I/O: keep both off the event loop.
-        return bool(token) and await anyio.to_thread.run_sync(self._access.verify, token.strip())
+        identity = await anyio.to_thread.run_sync(self._access.identify, token.strip())
+        return identity is not None, identity
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         # CORS preflights are answered by the outer CORSMiddleware and never reach this point.
         if scope["type"] != "http" or _is_health_probe(scope):
             await self._app(scope, receive, send)
             return
-        if not await self._authenticated(scope):
+        allowed, identity = await self._authenticate(scope)
+        if not allowed:
             await _send_json(send, 401, {"error": "unauthorized", "message": "Missing or invalid credentials."},
                              {"WWW-Authenticate": 'Bearer realm="mammo-triage"'})
             return
+        scope.setdefault("state", {})["identity"] = identity
         await self._app(scope, receive, send)
 
 
@@ -200,6 +214,58 @@ async def _health(_: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+_USAGE_TEXT = {
+    "en": {"title": "Pilot usage",
+           "note": "Analyses per day. Counts only: no images, results or identities are kept.",
+           "columns": ("Day", "Analyses", "People", "High priority", "Review", "No suspicious findings",
+                       "Not a mammogram", "Errors", "Views", "Views with heatmap"),
+           "total": "Total", "empty": "No analyses yet."},
+    "es": {"title": "Uso del piloto",
+           "note": "Análisis por día. Solo conteos: no se guardan imágenes, resultados ni identidades.",
+           "columns": ("Día", "Análisis", "Personas", "Alta prioridad", "Revisar", "Sin hallazgos",
+                       "No es mamografía", "Errores", "Vistas", "Vistas con mapa de calor"),
+           "total": "Total", "empty": "Todavía no hay análisis."},
+}
+_USAGE_FIELDS = ("analyses", "people", "high_priority", "review", "no_suspicious_findings", "not_a_mammogram",
+                 "errors", "views", "detailed_views")
+
+
+def _usage_html(days: list[DailyUsage], language: str) -> str:
+    t = _USAGE_TEXT[language]
+    head = "".join(f"<th>{c}</th>" for c in t["columns"])
+    rows = "".join(f"<tr><td>{d.day}</td>" + "".join(f"<td>{getattr(d, f)}</td>" for f in _USAGE_FIELDS) + "</tr>"
+                   for d in days)
+    # People are distinct per day only, so their total is left blank rather than summed.
+    totals = "".join(f"<td>{'' if f == 'people' else sum(getattr(d, f) for d in days)}</td>" for f in _USAGE_FIELDS)
+    body = (f"<table><thead><tr>{head}</tr></thead><tbody>{rows}</tbody>"
+            f"<tfoot><tr><td>{t['total']}</td>{totals}</tr></tfoot></table>") if days else f"<p>{t['empty']}</p>"
+    return (f"<!doctype html><html lang='{language}'><head><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+            f"<title>{t['title']}</title><style>body{{font-family:system-ui,sans-serif;margin:1.5rem}}"
+            "table{border-collapse:collapse;font-variant-numeric:tabular-nums}"
+            "th,td{border:1px solid #9ca3af;padding:.35rem .6rem;text-align:right}"
+            "th:first-child,td:first-child{text-align:left}tfoot td{font-weight:600}</style></head><body>"
+            f"<h1>{t['title']}</h1><p>{t['note']}</p>{body}</body></html>")
+
+
+def _usage_endpoint(options: HttpOptions) -> Callable[[Request], Awaitable[Response]]:
+    admins = {email.strip().lower() for email in options.admin_emails if email.strip()}
+
+    async def usage(request: Request) -> Response:
+        identity = getattr(request.state, "identity", None)
+        if options.usage_report is None or identity not in admins:
+            return JSONResponse({"error": "forbidden", "message": "Only the pilot administrator can see usage."},
+                                status_code=403)
+        param = request.query_params.get("days", "30")
+        days = int(param) if param.isascii() and param.isdigit() and len(param) <= 4 else 30
+        wanted = request.query_params.get("lang")
+        language = wanted if wanted in _USAGE_TEXT else (
+            "es" if request.headers.get("accept-language", "").lower().startswith("es") else "en")
+        report = await anyio.to_thread.run_sync(options.usage_report, days)
+        return HTMLResponse(_usage_html(report, language), headers={"Cache-Control": "no-store"})
+    return usage
+
+
 def create_http_app(mcp: MCPServer, options: HttpOptions) -> ASGIApp:
     security = TransportSecuritySettings(enable_dns_rebinding_protection=True,
                                          allowed_hosts=list(options.allowed_hosts),
@@ -207,6 +273,7 @@ def create_http_app(mcp: MCPServer, options: HttpOptions) -> ASGIApp:
     inner = mcp.streamable_http_app(streamable_http_path=MCP_PATH, json_response=True, stateless_http=True,
                                     max_request_body_size=options.max_body_bytes, transport_security=security)
     inner.router.routes.append(Route(HEALTH_PATH, _health, methods=["GET"]))
+    inner.router.routes.append(Route(USAGE_PATH, _usage_endpoint(options), methods=["GET"]))
     app: ASGIApp = BodyLimitMiddleware(inner, options.max_body_bytes)
     app = AuthenticationMiddleware(app, options.api_key, options.access)
     app = RateLimitMiddleware(app, options.rate_limit_per_minute, options.trust_proxy_headers)

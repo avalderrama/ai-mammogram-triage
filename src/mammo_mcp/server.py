@@ -11,6 +11,7 @@ from typing import Annotated, Any, Literal, Protocol, TypeVar
 import anyio
 from mcp import types
 from mcp.server import MCPServer
+from mcp.server.mcpserver import Context
 from pydantic import Field
 
 from mammo_application.analyses import (AnalysisResultDto, AnalyzeMammogramCommand, HeatmapFormat, ImageQuery,
@@ -87,6 +88,17 @@ class _ServerBusy(Exception):
     pass
 
 
+def _requester(ctx: Context | None) -> str | None:
+    """The Cloudflare Access identity the HTTP layer verified for this request (None over stdio or with the API key).
+    Only used to count distinct people per day; never logged or returned."""
+    try:
+        request = ctx.request_context.request if ctx is not None else None
+    except ValueError:  # no request context (called outside a request)
+        return None
+    identity = getattr(getattr(request, "state", None), "identity", None)
+    return identity if isinstance(identity, str) else None
+
+
 def create_mcp_server(handlers: McpHandlers, options: McpOptions) -> MCPServer:
     mcp = MCPServer(
         name="mammogram_triage_mcp",
@@ -143,6 +155,7 @@ def create_mcp_server(handlers: McpHandlers, options: McpOptions) -> MCPServer:
             "PNG of the same size, so a viewer can show or hide them.")] = "combined",
         response_format: ResponseFormat = "markdown",
         language: SummaryLanguage = "en",
+        ctx: Context | None = None,
     ) -> types.CallToolResult:
         """Mask personal data, reject non-mammograms and triage each breast of a mammogram image.
 
@@ -154,7 +167,7 @@ def create_mcp_server(handlers: McpHandlers, options: McpOptions) -> MCPServer:
         async def work() -> types.CallToolResult:
             command = AnalyzeMammogramCommand(load(image_base64, image_path), panel_count,
                                               tuple(sides) if sides else None, tuple(views) if views else None,
-                                              include_heatmap, heatmap_format)
+                                              include_heatmap, heatmap_format, _requester(ctx))
             result = await run(analyze_handler.handle, command)
             if not result.is_success:
                 return _app_error(result.error)
