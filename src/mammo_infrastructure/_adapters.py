@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 import threading
 
 import numpy as np
@@ -42,13 +43,20 @@ class _PanelSplitter:
 
 
 class _MammogramGate:
-    def __init__(self, model: GateModel, lock: threading.Lock) -> None:
-        self._model, self._lock = model, lock
+    """The gate in use decides. A shadow gate, when configured, judges the same view only to be compared with it (the
+    comparison callback counts agreements); it never changes a verdict."""
+
+    def __init__(self, model: GateModel, lock: threading.Lock, shadow: GateModel | None = None,
+                 compare: Callable[[bool, bool], None] | None = None) -> None:
+        self._model, self._lock, self._shadow, self._compare = model, lock, shadow, compare
 
     def check(self, panel: EncodedImage) -> GateVerdict:
         img = decode(panel)
         with self._lock:
             p = self._model.p_mammogram(img)
+            shadow_p = self._shadow.p_mammogram(img) if self._shadow is not None else None
+        if shadow_p is not None and self._compare is not None:
+            self._compare(p >= self._model.threshold, shadow_p >= self._shadow.threshold)
         if p < self._model.threshold:
             return GateVerdict(False, p)
         issues = tuple(QualityIssue(q) for q in self._model.quality_problems(img))

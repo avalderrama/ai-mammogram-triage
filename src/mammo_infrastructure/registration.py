@@ -1,7 +1,9 @@
 """Infrastructure registration: the only public entry point of this ring (CA-CFG-002)."""
 from __future__ import annotations
 
+import json
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,9 +45,22 @@ def _load_backend(bundle: ModelBundle, device_name: str) -> Backend:
     return torch_backend.load_backend(bundle, device_name)
 
 
-def create_ports(models_dir: Path, device_name: str = "auto", verify_bundle: bool = True) -> Ports:
+def _load_shadow_gate(gate_dir: Path, verify_bundle: bool) -> GateModel:
+    """Only the gate of another ONNX bundle (verified like any bundle): its other networks are not loaded."""
+    bundle = load_bundle(gate_dir, verify=verify_bundle)
+    if bundle.format != "onnx":
+        raise BundleError(f"The shadow gate bundle at {gate_dir} must be in ONNX format")
+    from .ml import onnx_backend
+    metas = json.loads(bundle.path("onnx_meta.json").read_text(encoding="utf-8"))
+    return GateModel(onnx_backend.load_network(bundle.network_path("gate"), "gate", metas["gate"]))
+
+
+def create_ports(models_dir: Path, device_name: str = "auto", verify_bundle: bool = True,
+                 shadow_gate_dir: Path | None = None,
+                 on_gate_comparison: Callable[[bool, bool], None] | None = None) -> Ports:
     """Loads the model bundle once (fails fast if it is missing or corrupted) and wires the adapters.
-    A single lock serializes inference so concurrent requests are safe."""
+    A single lock serializes inference so concurrent requests are safe. With shadow_gate_dir, the gate of that bundle
+    also judges every view, only to be compared with the gate in use (on_gate_comparison)."""
     bundle = load_bundle(models_dir, verify=verify_bundle)
     backend = _load_backend(bundle, device_name)
     nets = backend.networks
@@ -57,7 +72,8 @@ def create_ports(models_dir: Path, device_name: str = "auto", verify_bundle: boo
     return Ports(
         masker=_OcrPersonalDataMasker(masker, lock),
         splitter=_PanelSplitter(),
-        gate=_MammogramGate(gate, lock),
+        gate=_MammogramGate(gate, lock, _load_shadow_gate(shadow_gate_dir, verify_bundle) if shadow_gate_dir else None,
+                            on_gate_comparison),
         classifier=_BiradsClassifier(ensemble, scanner, bundle.patch_min_source_height, lock),
         fuser=_LogisticScoreFuser(bundle.calibration),
         thresholds=_BundleThresholds(bundle),

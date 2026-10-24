@@ -64,3 +64,23 @@ def test_equal_boxes_side_by_side_or_in_a_2x2_grid():
     assert equal_boxes((1000, 900), 2) == [(0, 0, 450, 1000), (450, 0, 900, 1000)]
     assert equal_boxes((1000, 900), 4, grid=True) == [(0, 0, 450, 500), (450, 0, 900, 500), (0, 500, 450, 1000),
                                                      (450, 500, 900, 1000)]
+
+
+def textured(height, width, seed=0):
+    return np.random.default_rng(seed).integers(40, 220, (height, width)).astype(np.uint8)
+
+
+def test_a_narrow_almost_flat_strip_is_not_a_view():
+    # A light-themed viewer: a flat light grey strip beside the image, split off by a white line.
+    image = np.full((1000, 1000), 200, np.uint8)
+    image[:, 140:144] = 250
+    image[:, 144:] = textured(1000, 856)
+    assert find_panel_boxes(image) == [(144, 0, 1000, 1000)]
+
+
+def test_narrow_views_with_tissue_are_kept():
+    image = np.zeros((1000, 1600), np.uint8)
+    for i in range(8):  # eight views side by side, 12.5 % of the width each
+        image[:, i * 200:(i + 1) * 200 - 4] = textured(1000, 196, seed=i)
+        image[:, (i + 1) * 200 - 4:(i + 1) * 200] = 250
+    assert len(find_panel_boxes(image)) == 8

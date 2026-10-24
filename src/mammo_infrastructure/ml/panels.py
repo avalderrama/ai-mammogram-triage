@@ -50,7 +50,25 @@ def find_panel_boxes(gray: np.ndarray) -> list[Box]:
             # Columns that only show up inside one row; nothing new to look for if nothing was split yet.
             inner = find_panels(piece) if piece.shape != gray.shape else [(0, x1 - x0)]
             boxes += [(x0 + a, y0, x0 + b, y1) for a, b in inner]
-    return _reading_order(boxes)
+    views = [b for b in boxes if not _blank_strip(gray, b)]
+    return _reading_order(views or boxes)
+
+
+# A view narrower (or shorter) than this share of the image that is also almost flat is a strip of the viewer or of
+# the monitor left by the split (seen on a light-themed viewer), not a mammogram: the gate could accept it.
+BLANK_STRIP_SHARE = 0.2
+BLANK_STRIP_RANGE = 60  # 95th minus 5th percentile, on a copy at most 128 px
+
+
+def _blank_strip(gray: np.ndarray, box: Box) -> bool:
+    x0, y0, x1, y1 = box
+    height, width = gray.shape
+    if (x1 - x0) >= BLANK_STRIP_SHARE * width and (y1 - y0) >= BLANK_STRIP_SHARE * height:
+        return False
+    piece = Image.fromarray(np.ascontiguousarray(gray[y0:y1, x0:x1]))
+    piece.thumbnail((128, 128), Image.BOX)
+    low, high = np.percentile(np.asarray(piece), (5, 95))
+    return high - low < BLANK_STRIP_RANGE
 
 
 def _reading_order(boxes: list[Box]) -> list[Box]:

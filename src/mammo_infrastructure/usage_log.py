@@ -104,6 +104,20 @@ class JsonUsageLog:
         except Exception as error:  # counting must never break an analysis
             log.warning("Could not count an analysis (%s).", type(error).__name__)
 
+    def record_gate_comparison(self, current: bool, shadow: bool) -> None:
+        try:
+            with self._lock:
+                day = self._today()
+                self._roll_over(day)
+                counts = self._state["days"].setdefault(day, {})
+                counts["gate_compared"] = counts.get("gate_compared", 0) + 1
+                if current != shadow:
+                    key = "gate_only_current" if current else "gate_only_shadow"
+                    counts[key] = counts.get(key, 0) + 1
+                self._save()
+        except Exception as error:  # counting must never break an analysis
+            log.warning("Could not count a gate comparison (%s).", type(error).__name__)
+
     def daily(self, days: int) -> list[DailyUsage]:
         with self._lock:
             self._roll_over(self._today())
@@ -115,6 +129,9 @@ class NoUsageLog:
     """When no usage file is configured (local runs, stdio): nothing is counted."""
 
     def record(self, event: UsageEvent) -> None:
+        pass
+
+    def record_gate_comparison(self, current: bool, shadow: bool) -> None:
         pass
 
     def daily(self, days: int) -> list[DailyUsage]:

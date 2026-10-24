@@ -112,6 +112,20 @@ MAMMO_ADMIN_EMAILS=<your Access e-mail>
 
 The API key stays for technical clients: read it on the VM with `sudo grep MAMMO_API_KEY /etc/mammo-triage/env`.
 
+## Trying a new gate in shadow mode
+
+To compare a new "is it a mammogram?" gate with the one in use on what doctors actually upload, deploy with the
+current bundle and pass the new one as `SHADOW_GATE_BUNDLE`:
+
+```bash
+SHADOW_GATE_BUNDLE=<path>/bundles/v1.1.0-onnx deploy/azure-vm/push.sh <vm-ip> <path>/bundles/v1-onnx <app dist> <tunnel folder>
+```
+
+The gate in use keeps deciding; the new one only judges, and `/usage` shows per day the views both judged and those
+where only one of them accepts. Nothing about the images is kept. When the numbers support it, deploy the new bundle
+as the main one without `SHADOW_GATE_BUNDLE` (that also turns shadow mode off). A gate the server does not know how to
+run (a newer version) stops the service at startup instead of running wrongly.
+
 ## 7. Close SSH
 
 Delete the SSH inbound rule of the VM's network security group. To run `push.sh` again, add it back for your IP

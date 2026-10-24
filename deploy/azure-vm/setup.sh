@@ -61,6 +61,16 @@ rm -rf "$APP/models.new" && install -d -m 750 -o root -g mammo "$APP/models.new"
 tar -xzf "$HERE/bundle.tar.gz" -C "$APP/models.new"
 chown -R root:mammo "$APP/models.new" && find "$APP/models.new" -type f -exec chmod 640 {} +
 rm -rf "$APP/models" && mv "$APP/models.new" "$APP/models"
+# Shadow gate (optional, push.sh SHADOW_GATE_BUNDLE): another bundle whose gate only observes; absent = turned off.
+rm -rf "$APP/models-shadow.new"
+if [ -f "$HERE/shadow-bundle.tar.gz" ]; then
+  install -d -m 750 -o root -g mammo "$APP/models-shadow.new"
+  tar -xzf "$HERE/shadow-bundle.tar.gz" -C "$APP/models-shadow.new"
+  chown -R root:mammo "$APP/models-shadow.new" && find "$APP/models-shadow.new" -type f -exec chmod 640 {} +
+  rm -rf "$APP/models-shadow" && mv "$APP/models-shadow.new" "$APP/models-shadow"
+else
+  rm -rf "$APP/models-shadow"
+fi
 
 echo "== 5. Configuration (the API key is generated here once and never printed)"
 install -d -m 700 /etc/mammo-triage
@@ -102,6 +112,9 @@ if [ -f "$HERE/access.env" ]; then
   fi
   unset ADMINS
 fi
+# The shadow gate follows what push.sh uploaded this time.
+sed -i '/^MAMMO_SHADOW_GATE_DIR=/d' "$ENV_FILE"
+[ ! -d "$APP/models-shadow" ] || echo "MAMMO_SHADOW_GATE_DIR=$APP/models-shadow" >> "$ENV_FILE"
 # Anonymous usage counters, in the service's state directory (mammo-triage.service, StateDirectory).
 grep -q '^MAMMO_USAGE_FILE=' "$ENV_FILE" || echo "MAMMO_USAGE_FILE=/var/lib/mammo-triage/usage.json" >> "$ENV_FILE"
 chmod 600 "$ENV_FILE"
