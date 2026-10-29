@@ -1,7 +1,7 @@
 # ai-mammogram-triage
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![M8ven Score](https://m8ven.ai/badge/mcp/avalderrama/ai-mammogram-triage?variant=verified)](https://m8ven.ai/mcp/avalderrama/ai-mammogram-triage?s=readme)
+[![M8ven Score](https://m8ven.ai/badge/mcp/avalderrama-ai-mammogram-triage-6iczdl?v=ba4ca95944e23efe680d1c101d0b4f09&variant=verified)](https://m8ven.ai/mcp/avalderrama-ai-mammogram-triage-6iczdl?s=readme)
 
 > **At a glance:** with high-resolution images, on patients the model never saw, it puts **87 %** of BI-RADS 4-5
 > breasts in `high_priority` or `review` and only **6.5 %** of normal (BI-RADS 1-2) breasts in `high_priority`
